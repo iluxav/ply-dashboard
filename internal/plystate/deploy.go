@@ -61,7 +61,7 @@ func Deployments(p Paths) []Deployment {
 		}
 		spec, _ := os.ReadFile(filepath.Join(p.Deployments, e.Name()))
 		d := Deployment{Name: name, Spec: string(spec)}
-		if raw, err := os.ReadFile(filepath.Join(p.Deployments, name+".status")); err == nil {
+		if raw, err := os.ReadFile(filepath.Join(p.Deployments, ".status", name+".status")); err == nil {
 			var st DeployStatus
 			if json.Unmarshal(raw, &st) == nil {
 				d.Status = &st
