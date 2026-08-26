@@ -29,6 +29,20 @@ function copyCmd(btn){
     const t=btn.textContent; btn.textContent='copied'; setTimeout(()=>btn.textContent=t,900);
   });
 }
+// logs behave like tail -f: stick to the bottom across htmx swaps, but
+// never yank the reader down while they are scrolled up reading history
+const pinned = el => el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
+document.addEventListener('htmx:beforeSwap', e => {
+  const pre = e.target.querySelector && e.target.querySelector('pre[data-logs]');
+  if (pre) e.target._logsPinned = pinned(pre);
+});
+document.addEventListener('htmx:afterSwap', e => {
+  const pre = e.target.querySelector && e.target.querySelector('pre[data-logs]');
+  if (pre && (e.target._logsPinned !== false)) pre.scrollTop = pre.scrollHeight;
+});
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('pre[data-logs]').forEach(p => p.scrollTop = p.scrollHeight);
+});
 </script>
 </body>
 </html>

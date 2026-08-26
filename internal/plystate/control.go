@@ -17,8 +17,14 @@ func controlDir(p Paths, app string) string {
 	return filepath.Join(p.Apps, app, "control")
 }
 
-// ControlWritable probes the grant by creating the control dir.
+// ControlWritable probes the grant by creating the control dir. In a
+// container the apps root must be a genuine bind mount first — creating it
+// ourselves would fabricate a private dir in the overlay and every command
+// would silently vanish.
 func ControlWritable(p Paths, app string) bool {
+	if !grantMounted(p.Apps) {
+		return false
+	}
 	if err := os.MkdirAll(controlDir(p, app), 0o755); err != nil {
 		return false
 	}

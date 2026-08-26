@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -301,4 +302,28 @@ func LogTail(p Paths, app string, n uint32, lines int) []string {
 		all = all[len(all)-lines:]
 	}
 	return all
+}
+
+// grantMounted: outside a container every host path is "mounted"; inside,
+// a grant root under /ply/host must be a real bind (different device than
+// /ply/host itself) — an absent grant must never be silently fabricated in
+// the container's writable overlay.
+func grantMounted(path string) bool {
+	if !strings.HasPrefix(path, "/ply/host/") {
+		return true // bare-host mode
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return false // not granted at all
+	}
+	parent, err := os.Stat("/ply/host")
+	if err != nil {
+		return false
+	}
+	sysInfo, ok1 := info.Sys().(*syscall.Stat_t)
+	sysParent, ok2 := parent.Sys().(*syscall.Stat_t)
+	if !ok1 || !ok2 {
+		return true // cannot tell; assume granted rather than dead-end
+	}
+	return sysInfo.Dev != sysParent.Dev
 }

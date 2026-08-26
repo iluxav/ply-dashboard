@@ -34,7 +34,7 @@ func (s DeployStatus) String() string {
 }
 
 func DeploymentsAvailable(p Paths) bool {
-	if p.Deployments == "" {
+	if p.Deployments == "" || !grantMounted(p.Deployments) {
 		return false
 	}
 	if err := os.MkdirAll(p.Deployments, 0o755); err != nil {

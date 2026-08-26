@@ -1,6 +1,6 @@
 {{define "logs"}}
 {{if .LogLines}}
-<pre class="bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-400 overflow-x-auto max-h-96 overflow-y-auto leading-5">{{range .LogLines}}{{.}}
+<pre data-logs class="bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-400 overflow-x-auto max-h-96 overflow-y-auto leading-5">{{range .LogLines}}{{.}}
 {{end}}</pre>
 {{else}}
 <div class="text-zinc-700 text-xs">no log ring yet — rings appear once instances run under a ply that writes them (v0.1.22+)</div>
