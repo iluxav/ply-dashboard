@@ -178,6 +178,7 @@ func main() {
 	mux.HandleFunc("POST /deploy", s.guard(s.deployCreate))
 	mux.HandleFunc("POST /deploy/{name}/delete", s.guard(s.deployDelete))
 	mux.HandleFunc("GET /partials/deployments", s.guard(s.deploymentsPartial))
+	mux.HandleFunc("GET /partials/events", s.guard(s.eventsPartial))
 	mux.HandleFunc("POST /deploy/{name}/now", s.guard(s.deployNow))
 	mux.HandleFunc("POST /deploy/inspect", s.guard(s.sourceInspect))
 	mux.HandleFunc("POST /deploy/preview", s.guard(s.sourcePreview))
@@ -203,8 +204,8 @@ func (s *server) parseTemplates() {
 		return template.Must(template.New("base.html").Funcs(funcs).ParseFS(webFS, paths...))
 	}
 	s.pages = map[string]*template.Template{
-		"index":  page("web/templates/index.html", "web/templates/apps_table.html"),
-		"app":    page("web/templates/app.html", "web/templates/instances.html", "web/templates/logs.html"),
+		"index":  page("web/templates/index.html", "web/templates/apps_table.html", "web/templates/events.html"),
+		"app":    page("web/templates/app.html", "web/templates/instances.html", "web/templates/logs.html", "web/templates/events.html"),
 		"deploy": page("web/templates/deploy.html", "web/templates/deployments.html", "web/templates/deploy_source.html"),
 		"login":  page("web/templates/login.html"),
 		"setup":  page("web/templates/setup.html"),
@@ -214,6 +215,7 @@ func (s *server) parseTemplates() {
 		"logs":          template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/logs.html")),
 		"deployments":   template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/deployments.html")),
 		"deploy_source": template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/deploy_source.html")),
+		"events":        template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/events.html")),
 	}
 }
 
@@ -239,6 +241,7 @@ type pageData struct {
 	DeployErr       string
 	Deployments     []plystate.Deployment
 	Source          *sourceForm
+	Events          []plystate.Event
 }
 
 // sourceForm is the from-source wizard's state: inspection result plus the
@@ -329,8 +332,20 @@ func secure(r *http.Request) bool {
 // --- views -------------------------------------------------------------------
 
 func (s *server) overview(w http.ResponseWriter, r *http.Request) {
-	apps := s.apps()
-	s.render(w, "index", "base.html", pageData{Authed: true, Apps: apps})
+	s.render(w, "index", "base.html", pageData{
+		Authed: true,
+		Apps:   s.apps(),
+		Events: plystate.Events(s.paths, "", 25),
+	})
+}
+
+func (s *server) eventsPartial(w http.ResponseWriter, r *http.Request) {
+	app := r.URL.Query().Get("app")
+	limit := 25
+	if app != "" {
+		limit = 15
+	}
+	s.render(w, "events", "events", pageData{Events: plystate.Events(s.paths, app, limit)})
 }
 
 func (s *server) appsPartial(w http.ResponseWriter, r *http.Request) {
@@ -348,6 +363,7 @@ func (s *server) appPage(w http.ResponseWriter, r *http.Request) {
 	data.Authed = true
 	data.Commands = commandsFor(app)
 	data.LogLines = s.logLines(app)
+	data.Events = plystate.Events(s.paths, name, 15)
 	s.render(w, "app", "base.html", data)
 }
 

@@ -62,7 +62,21 @@ func newMockWorld(root string) *mockWorld {
 	w.spawn("worker", 2, mockApp{port: "job:9090", restarts: 13, started: now.Add(-6 * time.Hour), dead: true})
 
 	w.seedDeployments()
+	// event history so the panel isn't empty on first paint
+	w.event(now.Add(-73*time.Hour), "nextapp", "deploy", "deployed nextapp-0.1.0-linux-x64.img @ 6bb7edf")
+	w.event(now.Add(-49*time.Hour), "postgres", "deploy", "deployed postgres-17.10-linux-x64.img")
+	w.event(now.Add(-9*time.Hour), "redis", "deploy", "deployed redis-8.0.2-linux-x64.img @ 8.0.2")
+	w.event(now.Add(-5*time.Hour), "nextapp", "scale", "1 -> 2")
+	w.event(now.Add(-95*time.Second), "worker", "deploy-failed", "build failed (exit 101) — `ply logs worker-builder` has the output")
+	w.event(now.Add(-47*time.Second), "worker", "instance-restart", "worker.1 respawned (restart #7)")
 	return w
+}
+
+// event appends one journal line, timestamped in the past for seeds.
+func (w *mockWorld) event(at time.Time, app, event, detail string) {
+	e := Event{TS: at.Unix(), App: app, Event: event, Detail: detail}
+	raw, _ := json.Marshal(e)
+	appendFile(filepath.Join(w.p.Apps, "events.log"), string(raw)+"\n")
 }
 
 type mockApp struct {
@@ -231,11 +245,13 @@ func (w *mockWorld) answerControls() {
 			}
 			w.scaleTo(app, uint32(n))
 			w.result(app, CommandResult{Command: "scale", OK: true, Detail: fmt.Sprintf("scaled to %d", n), TS: time.Now().Unix()})
+			w.event(time.Now(), app, "scale", fmt.Sprintf("-> %d", n))
 		}
 		if _, err := os.Stat(filepath.Join(dir, "restart")); err == nil {
 			_ = os.Remove(filepath.Join(dir, "restart"))
 			rolled := w.restartAll(app)
 			w.result(app, CommandResult{Command: "restart", OK: true, Detail: fmt.Sprintf("rolled %d instances", rolled), TS: time.Now().Unix()})
+			w.event(time.Now(), app, "restart", fmt.Sprintf("rolling restart (%d slots)", rolled))
 		}
 	}
 }
@@ -314,7 +330,9 @@ func (w *mockWorld) playReconciler() {
 			continue
 		}
 		delete(w.firstSeen, name)
-		w.writeStatus(name, DeployStatus{OK: true, Detail: fmt.Sprintf("deployed %s-0.1.0-linux-x64.img @ %07x", name, rand.IntN(0xfffffff)), TS: time.Now().Unix()})
+		detail := fmt.Sprintf("deployed %s-0.1.0-linux-x64.img @ %07x", name, rand.IntN(0xfffffff))
+		w.writeStatus(name, DeployStatus{OK: true, Detail: detail, TS: time.Now().Unix()})
+		w.event(time.Now(), name, "deploy", detail)
 		if instances, _ := List(w.p); !hasApp(instances, name) {
 			w.spawn(name, 1, mockApp{port: "web:8080", started: time.Now()})
 		}
@@ -340,6 +358,7 @@ func (w *mockWorld) crashWorker() {
 	appendFile(log, fmt.Sprintf("%s | panic: connection reset by peer (queue upstream)\n", stamp()))
 	appendFile(log, fmt.Sprintf("%s | goroutine 1 [running]: main.consume(0xc000112000)\n", stamp()))
 	appendFile(log, fmt.Sprintf("%s | worker starting (attempt %d) — connecting to queue…\n", stamp(), inst.Restarts+1))
+	w.event(time.Now(), "worker", "instance-restart", fmt.Sprintf("worker.1 respawned (restart #%d)", inst.Restarts))
 }
 
 func hasApp(instances []Instance, app string) bool {

@@ -10,6 +10,11 @@
   {{template "logs" .}}
 </div>
 
+<h2 class="text-zinc-500 text-xs uppercase tracking-widest mt-10 mb-3">events</h2>
+<div hx-get="/partials/events?app={{.AppName}}" hx-trigger="every 5s" hx-swap="innerHTML">
+  {{template "events" .}}
+</div>
+
 <h2 class="text-zinc-500 text-xs uppercase tracking-widest mt-10 mb-3">commands</h2>
 <div class="space-y-1.5">
   {{range .Commands}}

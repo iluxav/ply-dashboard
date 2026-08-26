@@ -218,3 +218,35 @@ func TestTouchDeployment(t *testing.T) {
 		t.Error("missing deployment should error")
 	}
 }
+
+func TestEventsJournal(t *testing.T) {
+	w := newMockWorld(t.TempDir())
+	all := Events(w.p, "", 25)
+	if len(all) < 6 {
+		t.Fatalf("want seeded events, got %d", len(all))
+	}
+	if all[0].TS < all[len(all)-1].TS {
+		t.Error("events must be newest first")
+	}
+	worker := Events(w.p, "worker", 25)
+	for _, e := range worker {
+		if e.App != "worker" {
+			t.Errorf("filter leaked %q", e.App)
+		}
+	}
+	if len(worker) != 2 {
+		t.Errorf("worker should have 2 seeded events, got %d", len(worker))
+	}
+	kinds := map[string]bool{}
+	for _, e := range all {
+		kinds[e.Event] = true
+	}
+	for _, want := range []string{"deploy", "deploy-failed", "scale", "instance-restart"} {
+		if !kinds[want] {
+			t.Errorf("event kind %q missing from seeds", want)
+		}
+	}
+	if all[0].Age() == "-" {
+		t.Errorf("Age broken: %+v", all[0])
+	}
+}

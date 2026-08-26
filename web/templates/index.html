@@ -4,4 +4,9 @@
 <div hx-get="/partials/apps" hx-trigger="every 3s" hx-swap="innerHTML">
   {{template "apps_table" .}}
 </div>
+
+<h2 class="text-zinc-500 text-xs uppercase tracking-widest mt-10 mb-3">recent events</h2>
+<div hx-get="/partials/events" hx-trigger="every 5s" hx-swap="innerHTML">
+  {{template "events" .}}
+</div>
 {{end}}
