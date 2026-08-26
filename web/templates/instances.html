@@ -34,4 +34,21 @@
   {{range .App.Domains}}<a class="text-sky-400 hover:underline" href="https://{{.}}">{{.}}</a>{{end}}
   <span>image <span class="text-zinc-400">{{(.App.Oldest).ImageVersion}}</span></span>
 </div>
+
+{{if .Writable}}
+<div class="flex items-center gap-2 mt-4 text-xs">
+  <span class="text-zinc-600">scale</span>
+  <button hx-post="/app/{{.AppName}}/scale?to={{.ScaleDown}}" hx-target="#live" hx-swap="innerHTML"
+          class="border border-zinc-800 rounded px-2 py-0.5 hover:border-zinc-500 {{if le (len .Instances) 1}}opacity-30 pointer-events-none{{end}}">−</button>
+  <span class="text-zinc-100 w-4 text-center">{{len .Instances}}</span>
+  <button hx-post="/app/{{.AppName}}/scale?to={{.ScaleUp}}" hx-target="#live" hx-swap="innerHTML"
+          class="border border-zinc-800 rounded px-2 py-0.5 hover:border-zinc-500">+</button>
+  <button hx-post="/app/{{.AppName}}/restart" hx-target="#live" hx-swap="innerHTML"
+          hx-confirm="Rolling restart of {{.AppName}} — one slot at a time, health-gated. Continue?"
+          class="border border-zinc-800 rounded px-2 py-0.5 hover:border-amber-400 ml-4">restart</button>
+  {{with .LastResult}}<span class="ml-4 {{if .OK}}text-zinc-500{{else}}text-red-400{{end}}">{{.}}</span>{{end}}
+</div>
+{{else}}
+<div class="text-zinc-700 text-xs mt-4">observe-only — the apps dir grant is read-only; commands need it writable</div>
+{{end}}
 {{end}}

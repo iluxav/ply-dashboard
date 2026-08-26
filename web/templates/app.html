@@ -1,7 +1,7 @@
 {{define "title"}}ply · {{.AppName}}{{end}}
 {{define "crumb"}}apps / {{.AppName}}{{end}}
 {{define "content"}}
-<div hx-get="/partials/app/{{.AppName}}" hx-trigger="every 3s" hx-swap="innerHTML">
+<div id="live" hx-get="/partials/app/{{.AppName}}" hx-trigger="every 3s" hx-swap="innerHTML">
   {{template "instances" .}}
 </div>
 

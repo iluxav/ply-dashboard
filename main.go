@@ -13,6 +13,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -65,6 +66,8 @@ func main() {
 	mux.HandleFunc("GET /partials/apps", s.guard(s.appsPartial))
 	mux.HandleFunc("GET /partials/app/{name}", s.guard(s.appPartial))
 	mux.HandleFunc("GET /partials/logs/{name}", s.guard(s.logsPartial))
+	mux.HandleFunc("POST /app/{name}/scale", s.guard(s.scaleAction))
+	mux.HandleFunc("POST /app/{name}/restart", s.guard(s.restartAction))
 
 	log.Printf("ply-dashboard %s — listening on :%s (state: %s)", version, port, paths.State)
 	log.Fatal(http.ListenAndServe(":"+port, mux))
@@ -97,12 +100,16 @@ type pageData struct {
 	Version string
 	Error   string
 
-	Apps      []plystate.App
-	AppName   string
-	App       plystate.App
-	Instances []plystate.Instance
-	Commands  []command
-	LogLines  []string
+	Apps       []plystate.App
+	AppName    string
+	App        plystate.App
+	Instances  []plystate.Instance
+	Commands   []command
+	LogLines   []string
+	Writable   bool
+	ScaleUp    int
+	ScaleDown  int
+	LastResult *plystate.CommandResult
 }
 
 func (s *server) render(w http.ResponseWriter, page, name string, data pageData) {
@@ -194,14 +201,11 @@ func (s *server) appPage(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	s.render(w, "app", "base.html", pageData{
-		Authed:    true,
-		AppName:   name,
-		App:       app,
-		Instances: app.Instances,
-		Commands:  commandsFor(app),
-		LogLines:  s.logLines(app),
-	})
+	data := s.liveData(name, app)
+	data.Authed = true
+	data.Commands = commandsFor(app)
+	data.LogLines = s.logLines(app)
+	s.render(w, "app", "base.html", data)
 }
 
 func (s *server) appPartial(w http.ResponseWriter, r *http.Request) {
@@ -211,11 +215,50 @@ func (s *server) appPartial(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	s.render(w, "instances", "instances", pageData{
-		AppName:   name,
-		App:       app,
-		Instances: app.Instances,
-	})
+	s.render(w, "instances", "instances", s.liveData(name, app))
+}
+
+// liveData: everything inside the polled #live section, buttons included.
+func (s *server) liveData(name string, app plystate.App) pageData {
+	n := len(app.Instances)
+	return pageData{
+		AppName:    name,
+		App:        app,
+		Instances:  app.Instances,
+		Writable:   plystate.ControlWritable(s.paths, name),
+		ScaleUp:    n + 1,
+		ScaleDown:  max(n-1, 1),
+		LastResult: plystate.LastResult(s.paths, name),
+	}
+}
+
+func (s *server) scaleAction(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	app, ok := s.app(name)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	to := r.URL.Query().Get("to")
+	if n, err := strconv.Atoi(to); err == nil && n >= 1 && n <= 100 {
+		if err := plystate.SubmitControl(s.paths, name, "scale", to); err != nil {
+			log.Printf("scale %s: %v", name, err)
+		}
+	}
+	s.render(w, "instances", "instances", s.liveData(name, app))
+}
+
+func (s *server) restartAction(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	app, ok := s.app(name)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	if err := plystate.SubmitControl(s.paths, name, "restart", ""); err != nil {
+		log.Printf("restart %s: %v", name, err)
+	}
+	s.render(w, "instances", "instances", s.liveData(name, app))
 }
 
 func (s *server) logsPartial(w http.ResponseWriter, r *http.Request) {
