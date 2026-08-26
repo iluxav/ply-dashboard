@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -75,23 +76,9 @@ func Deployments(p Paths) []Deployment {
 
 var deployName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
-// WriteDeployment renders and atomically lands a spec file.
-// env is KEY=VALUE lines; blank values are dropped (unfilled form rows).
-func WriteDeployment(p Paths, name, app, version, publish, domain, envLines string) error {
-	if !deployName.MatchString(name) {
-		return fmt.Errorf("deployment name must be [a-z0-9-], got %q", name)
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "app = %q\n", app)
-	if version != "" {
-		fmt.Fprintf(&b, "version = %q\n", version)
-	}
-	if publish != "" {
-		fmt.Fprintf(&b, "publish = [%q]\n", publish)
-	}
-	if domain != "" {
-		fmt.Fprintf(&b, "domain = [%q]\n", domain)
-	}
+// renderEnv appends an [env] table from KEY=VALUE lines; blank values and
+// comments are dropped (unfilled form rows), first duplicate wins.
+func renderEnv(b *strings.Builder, envLines string) {
 	env := map[string]string{}
 	var keys []string
 	for _, line := range strings.Split(envLines, "\n") {
@@ -113,9 +100,29 @@ func WriteDeployment(p Paths, name, app, version, publish, domain, envLines stri
 	if len(keys) > 0 {
 		b.WriteString("\n[env]\n")
 		for _, key := range keys {
-			fmt.Fprintf(&b, "%s = %q\n", key, env[key])
+			fmt.Fprintf(b, "%s = %q\n", key, env[key])
 		}
 	}
+}
+
+// WriteDeployment renders and atomically lands a spec file.
+// env is KEY=VALUE lines; blank values are dropped (unfilled form rows).
+func WriteDeployment(p Paths, name, app, version, publish, domain, envLines string) error {
+	if !deployName.MatchString(name) {
+		return fmt.Errorf("deployment name must be [a-z0-9-], got %q", name)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "app = %q\n", app)
+	if version != "" {
+		fmt.Fprintf(&b, "version = %q\n", version)
+	}
+	if publish != "" {
+		fmt.Fprintf(&b, "publish = [%q]\n", publish)
+	}
+	if domain != "" {
+		fmt.Fprintf(&b, "domain = [%q]\n", domain)
+	}
+	renderEnv(&b, envLines)
 
 	tmp := filepath.Join(p.Deployments, "."+name+".toml.tmp")
 	if err := os.WriteFile(tmp, []byte(b.String()), 0o600); err != nil {
@@ -129,4 +136,197 @@ func DeleteDeployment(p Paths, name string) error {
 		return fmt.Errorf("bad deployment name")
 	}
 	return os.Remove(filepath.Join(p.Deployments, name+".toml"))
+}
+
+// --- freshness plumbing ------------------------------------------------------
+
+// Field pulls one string value out of the raw spec TOML — enough for the
+// freshness checker to learn repo/github/ref without a TOML dependency.
+func (d Deployment) Field(key string) string {
+	pattern := regexp.MustCompile(`(?m)^\s*` + regexp.QuoteMeta(key) + `\s*=\s*"([^"]*)"`)
+	if m := pattern.FindStringSubmatch(d.Spec); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+var (
+	deployedCommit  = regexp.MustCompile(`@ ([0-9a-f]{7,40})\b`)
+	deployedVersion = regexp.MustCompile(`-([0-9]+\.[0-9]+\.[0-9][^ /-]*)-linux-(?:x64|arm64)\.img`)
+)
+
+// DeployedCommit reads the `@ <commit>` the reconcile status reports for
+// repo-lane builds; empty when unknown.
+func (d Deployment) DeployedCommit() string {
+	if d.Status == nil {
+		return ""
+	}
+	if m := deployedCommit.FindStringSubmatch(d.Status.Detail); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+// DeployedVersion reads the image version out of the status detail's
+// `<name>-<ver>-linux-<arch>.img`; empty when unknown.
+func (d Deployment) DeployedVersion() string {
+	if d.Status == nil {
+		return ""
+	}
+	if m := deployedVersion.FindStringSubmatch(d.Status.Detail); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+// TouchDeployment rewrites the spec unchanged (write-temp, rename) so the
+// systemd.path watch fires and `ply reconcile` re-resolves the source —
+// the deploy-now button is just a touch.
+func TouchDeployment(p Paths, name string) error {
+	if !deployName.MatchString(name) {
+		return fmt.Errorf("bad deployment name")
+	}
+	path := filepath.Join(p.Deployments, name+".toml")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	tmp := filepath.Join(p.Deployments, "."+name+".toml.tmp")
+	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// --- the repo lane (from-source wizard) --------------------------------------
+
+// SourceSpec holds the wizard form as typed: strings in, validation and
+// TOML shaping here, so the preview and the written file cannot diverge.
+type SourceSpec struct {
+	Name       string
+	Repo       string
+	Ref        string
+	Build      string
+	Runtime    string
+	DeployKey  string // path reference (".keys/<name>"), not the key itself
+	Entrypoint string // whitespace-split into the array form
+	Include    string // comma-split
+	Port       string
+	Publish    string
+	Domain     string
+	Env        string // KEY=VALUE lines
+}
+
+// Render validates and returns the exact TOML the deployment file will
+// hold — the preview shows this string, the write writes it.
+func (s SourceSpec) Render() (string, error) {
+	if !deployName.MatchString(s.Name) {
+		return "", fmt.Errorf("deployment name must be [a-z0-9-], got %q", s.Name)
+	}
+	repo := strings.TrimSpace(s.Repo)
+	if repo == "" {
+		return "", fmt.Errorf("repo URL is required")
+	}
+	if strings.ContainsAny(repo, " \t\"'") {
+		return "", fmt.Errorf("repo URL %q contains spaces or quotes", repo)
+	}
+	var port int
+	if v := strings.TrimSpace(s.Port); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 65535 {
+			return "", fmt.Errorf("port must be 1-65535, got %q", v)
+		}
+		port = n
+	}
+	if strings.TrimSpace(s.Build) == "" && strings.TrimSpace(s.Entrypoint) == "" {
+		return "", fmt.Errorf("need a build command, an entrypoint, or both — an empty spec builds nothing")
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "repo = %q\n", repo)
+	writeOpt := func(key, value string) {
+		if v := strings.TrimSpace(value); v != "" {
+			fmt.Fprintf(&b, "%s = %q\n", key, v)
+		}
+	}
+	writeOpt("ref", s.Ref)
+	writeOpt("deploy_key", s.DeployKey)
+	writeOpt("build", s.Build)
+	writeOpt("runtime", s.Runtime)
+	if fields := strings.Fields(s.Entrypoint); len(fields) > 0 {
+		b.WriteString("entrypoint = [")
+		for i, f := range fields {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(&b, "%q", f)
+		}
+		b.WriteString("]\n")
+	}
+	if include := splitList(s.Include); len(include) > 0 {
+		b.WriteString("include = [")
+		for i, f := range include {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			fmt.Fprintf(&b, "%q", f)
+		}
+		b.WriteString("]\n")
+	}
+	if port > 0 {
+		fmt.Fprintf(&b, "port = %d\n", port)
+	}
+	if v := strings.TrimSpace(s.Publish); v != "" {
+		fmt.Fprintf(&b, "publish = [%q]\n", v)
+	}
+	if v := strings.TrimSpace(s.Domain); v != "" {
+		fmt.Fprintf(&b, "domain = [%q]\n", v)
+	}
+	renderEnv(&b, s.Env)
+	return b.String(), nil
+}
+
+func splitList(csv string) []string {
+	var out []string
+	for _, part := range strings.Split(csv, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+func WriteSourceDeployment(p Paths, s SourceSpec) error {
+	text, err := s.Render()
+	if err != nil {
+		return err
+	}
+	tmp := filepath.Join(p.Deployments, "."+s.Name+".toml.tmp")
+	if err := os.WriteFile(tmp, []byte(text), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, filepath.Join(p.Deployments, s.Name+".toml"))
+}
+
+// WriteDeployKey stores a pasted read-only deploy key under the
+// deployments dir (root-owned, 0600) and returns the relative reference
+// the spec should carry — `ply reconcile` resolves it against the same
+// dir, so neither side has to know the other's mount point.
+func WriteDeployKey(p Paths, name, key string) (string, error) {
+	if !deployName.MatchString(name) {
+		return "", fmt.Errorf("bad deployment name")
+	}
+	key = strings.TrimSpace(key)
+	if !strings.Contains(key, "PRIVATE KEY") {
+		return "", fmt.Errorf("that doesn't look like a private key (expected an OpenSSH `PRIVATE KEY` block)")
+	}
+	dir := filepath.Join(p.Deployments, ".keys")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	// ssh rejects a key file without a trailing newline; textarea paste loses it
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(key+"\n"), 0o600); err != nil {
+		return "", err
+	}
+	return ".keys/" + name, nil
 }

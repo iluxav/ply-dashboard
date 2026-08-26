@@ -1,0 +1,100 @@
+{{define "deploy_source"}}
+<div id="source-wizard">
+  <form hx-post="/deploy/inspect" hx-target="#source-wizard" hx-swap="outerHTML" class="flex gap-2 text-xs">
+    <input name="repo" value="{{with .Source}}{{.RepoURL}}{{end}}"
+           placeholder="https://github.com/org/repo — public or private"
+           class="flex-1 bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100">
+    <button class="bg-zinc-100 text-zinc-950 rounded px-4 py-1.5 font-bold hover:bg-white">inspect</button>
+  </form>
+
+{{with .Source}}
+  {{with .Error}}<div class="text-red-400 text-xs mt-3 border border-red-900/60 rounded px-3 py-2">{{.}}</div>{{end}}
+  {{if .Inspected}}
+
+  <div class="mt-3 text-xs">
+    {{if .Insp.Markers}}
+      <span class="text-zinc-600">detected:</span>
+      {{range .Insp.Markers}}<span class="text-zinc-400 border border-zinc-800 rounded px-1.5 py-0.5 mr-1">{{.}}</span>{{end}}
+    {{end}}
+    {{with .Insp.Note}}<div class="text-amber-400/90 mt-2">{{.}}</div>{{end}}
+  </div>
+
+  <form class="mt-3 grid gap-2 text-xs md:grid-cols-2"
+        hx-post="/deploy/preview" hx-trigger="input delay:400ms" hx-target="#spec-preview" hx-swap="innerHTML">
+    <input type="hidden" name="inspected" value="1">
+    <input type="hidden" name="repo" value="{{.Spec.Repo}}">
+    <input type="hidden" name="ssh_url" value="{{.Insp.SSHURL}}">
+
+    <label class="grid gap-1">
+      <span class="text-zinc-600">deployment name</span>
+      <input name="name" value="{{.Spec.Name}}" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100">
+    </label>
+    <label class="grid gap-1">
+      <span class="text-zinc-600">preset <span class="text-zinc-700">(refills build/run fields)</span></span>
+      <select name="framework" hx-post="/deploy/inspect" hx-include="closest form" hx-target="#source-wizard" hx-swap="outerHTML"
+              class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100">
+        {{$f := .Framework}}{{range .Frameworks}}<option {{if eq . $f}}selected{{end}}>{{.}}</option>{{end}}
+      </select>
+    </label>
+    <label class="grid gap-1">
+      <span class="text-zinc-600">branch / ref <span class="text-zinc-700">(blank = remote HEAD)</span></span>
+      <input name="ref" value="{{.Spec.Ref}}" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100">
+    </label>
+    <label class="grid gap-1">
+      <span class="text-zinc-600">runtime keg <span class="text-zinc-700">(builder toolchain)</span></span>
+      <input name="runtime" value="{{.Spec.Runtime}}" placeholder="node@24" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100">
+    </label>
+    <label class="grid gap-1 md:col-span-2">
+      <span class="text-zinc-600">build command <span class="text-zinc-700">(runs memory-fenced in a throwaway builder)</span></span>
+      <textarea name="build" rows="2" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100 font-mono">{{.Spec.Build}}</textarea>
+    </label>
+    <label class="grid gap-1">
+      <span class="text-zinc-600">entrypoint <span class="text-zinc-700">(needed unless the repo has a ply.toml)</span></span>
+      <input name="entrypoint" value="{{.Spec.Entrypoint}}" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100 font-mono">
+    </label>
+    <label class="grid gap-1">
+      <span class="text-zinc-600">include <span class="text-zinc-700">(comma-separated paths packed into the image)</span></span>
+      <input name="include" value="{{.Spec.Include}}" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100 font-mono">
+    </label>
+    <label class="grid gap-1">
+      <span class="text-zinc-600">port</span>
+      <input name="port" value="{{.Spec.Port}}" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100">
+    </label>
+    <label class="grid gap-1">
+      <span class="text-zinc-600">publish (ADDR:PORT)</span>
+      <input name="publish" value="{{.Spec.Publish}}" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100">
+    </label>
+    <label class="grid gap-1">
+      <span class="text-zinc-600">domain <span class="text-zinc-700">(optional, via the edge)</span></span>
+      <input name="domain" value="{{.Spec.Domain}}" placeholder="app.example.com" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100">
+    </label>
+    <label class="grid gap-1">
+      <span class="text-zinc-600">env (KEY=VALUE per line)</span>
+      <textarea name="env" rows="2" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100 font-mono">{{.Spec.Env}}</textarea>
+    </label>
+    <label class="grid gap-1 md:col-span-2">
+      <span class="text-zinc-600">deploy key
+        <span class="text-zinc-700">— required for private repos; stored root-only as deployments/.keys/&lt;name&gt;, the spec switches to the ssh URL</span>
+      </span>
+      <textarea name="key" rows="3" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----" spellcheck="false"
+                class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100 font-mono">{{.Key}}</textarea>
+    </label>
+
+    <div class="md:col-span-2">
+      <span class="text-zinc-600">the file that will be written — deployments/<span class="text-zinc-400">{{.Spec.Name}}.toml</span>:</span>
+      <div id="spec-preview" class="mt-1">
+        {{if .Preview}}<pre class="border border-zinc-800 rounded px-3 py-2 text-zinc-400 overflow-x-auto">{{.Preview}}</pre>
+        {{else}}<div class="text-zinc-700">fill the form — the preview appears here</div>{{end}}
+      </div>
+    </div>
+
+    <div class="md:col-span-2">
+      <button hx-post="/deploy/source" hx-target="#source-wizard" hx-swap="outerHTML" hx-include="closest form"
+              class="bg-zinc-100 text-zinc-950 rounded px-4 py-1.5 font-bold hover:bg-white">create deployment</button>
+      <span class="text-zinc-700 ml-3">systemd notices the file, `ply reconcile` clones and builds on this host</span>
+    </div>
+  </form>
+  {{end}}
+{{end}}
+</div>
+{{end}}

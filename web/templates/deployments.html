@@ -12,6 +12,19 @@
       {{else}}
         <span class="text-xs text-zinc-600">waiting for reconcile…</span>
       {{end}}
+      {{$fresh := freshOf .Name}}
+      {{with $fresh}}
+        {{if .UpdateAvailable}}
+          <span class="text-amber-400 text-xs">update available: {{.Latest}}</span>
+        {{else}}
+          <span class="text-zinc-700 text-xs">up to date</span>
+        {{end}}
+      {{end}}
+      {{if and $fresh $fresh.UpdateAvailable}}
+      <form method="post" action="/deploy/{{.Name}}/now">
+        <button class="text-amber-400 hover:text-amber-300 text-xs border border-amber-900/60 rounded px-2 py-0.5">deploy now</button>
+      </form>
+      {{end}}
       <form method="post" action="/deploy/{{.Name}}/delete" class="ml-auto"
             onsubmit="return confirm('Delete deployment {{.Name}}? The app stops and its unit is removed (volumes kept).')">
         <button class="text-zinc-600 hover:text-red-400 text-xs">delete</button>

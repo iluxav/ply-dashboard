@@ -13,12 +13,16 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/iluxav/ply-dashboard/internal/auth"
+	"github.com/iluxav/ply-dashboard/internal/github"
 	"github.com/iluxav/ply-dashboard/internal/plystate"
 	"github.com/iluxav/ply-dashboard/internal/registry"
 
@@ -38,7 +42,83 @@ type server struct {
 	sampler  *plystate.Sampler
 	auth     *auth.Auth
 	registry *registry.Client
+	fresh    *freshness
 	pages    map[string]*template.Template
+}
+
+// --- freshness: is a newer commit/release available? -------------------------
+
+// One background sweep every 2 minutes; the 3s-polling partials only read
+// the cache. Checks are tokenless and rate-limit-free: smart-HTTP refs
+// advertisement for repo lanes, the releases/latest redirect for github
+// lanes. Private sources are honestly unknowable from here and get no row.
+type freshness struct {
+	paths  plystate.Paths
+	mu     sync.Mutex
+	byName map[string]*Freshness
+}
+
+type Freshness struct {
+	Current         string
+	Latest          string
+	UpdateAvailable bool
+}
+
+func newFreshness(p plystate.Paths) *freshness {
+	return &freshness{paths: p, byName: map[string]*Freshness{}}
+}
+
+func (f *freshness) run() {
+	for {
+		f.sweep()
+		time.Sleep(2 * time.Minute)
+	}
+}
+
+func (f *freshness) sweep() {
+	seen := map[string]bool{}
+	for _, d := range plystate.Deployments(f.paths) {
+		var fr *Freshness
+		switch {
+		case d.Field("github") != "":
+			latest, err := github.LatestRelease(d.Field("github"))
+			if err != nil {
+				continue
+			}
+			cur := d.DeployedVersion()
+			fr = &Freshness{Current: cur, Latest: latest, UpdateAvailable: cur != "" && cur != latest}
+		case strings.HasPrefix(d.Field("repo"), "http"):
+			sha, err := github.LsRemote(d.Field("repo"), d.Field("ref"))
+			if err != nil {
+				continue
+			}
+			cur := d.DeployedCommit()
+			fr = &Freshness{
+				Current:         cur,
+				Latest:          sha[:7],
+				UpdateAvailable: cur != "" && !strings.HasPrefix(sha, cur),
+			}
+		default:
+			continue // registry/image lanes and ssh remotes: nothing to probe
+		}
+		f.mu.Lock()
+		f.byName[d.Name] = fr
+		seen[d.Name] = true
+		f.mu.Unlock()
+	}
+	f.mu.Lock()
+	for name := range f.byName {
+		if !seen[name] {
+			delete(f.byName, name)
+		}
+	}
+	f.mu.Unlock()
+}
+
+func (f *freshness) Of(name string) *Freshness {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.byName[name]
 }
 
 func main() {
@@ -68,7 +148,10 @@ func main() {
 	sampler := plystate.NewSampler(paths, 3*time.Second)
 	go sampler.Run()
 
-	s := &server{paths: paths, sampler: sampler, auth: a, registry: registry.NewClient()}
+	fresh := newFreshness(paths)
+	go fresh.run()
+
+	s := &server{paths: paths, sampler: sampler, auth: a, registry: registry.NewClient(), fresh: fresh}
 	s.parseTemplates()
 
 	mux := http.NewServeMux()
@@ -95,6 +178,10 @@ func main() {
 	mux.HandleFunc("POST /deploy", s.guard(s.deployCreate))
 	mux.HandleFunc("POST /deploy/{name}/delete", s.guard(s.deployDelete))
 	mux.HandleFunc("GET /partials/deployments", s.guard(s.deploymentsPartial))
+	mux.HandleFunc("POST /deploy/{name}/now", s.guard(s.deployNow))
+	mux.HandleFunc("POST /deploy/inspect", s.guard(s.sourceInspect))
+	mux.HandleFunc("POST /deploy/preview", s.guard(s.sourcePreview))
+	mux.HandleFunc("POST /deploy/source", s.guard(s.sourceCreate))
 
 	log.Printf("ply-dashboard %s — listening on :%s (state: %s)", version, port, paths.State)
 	log.Fatal(http.ListenAndServe(":"+port, mux))
@@ -109,6 +196,7 @@ func (s *server) parseTemplates() {
 		"statsOf":        s.sampler.Stats,
 		"contract":       registry.Contract,
 		"defaultPublish": registry.DefaultPublish,
+		"freshOf":        s.fresh.Of,
 	}
 	page := func(files ...string) *template.Template {
 		paths := append([]string{"web/templates/base.html"}, files...)
@@ -117,14 +205,15 @@ func (s *server) parseTemplates() {
 	s.pages = map[string]*template.Template{
 		"index":  page("web/templates/index.html", "web/templates/apps_table.html"),
 		"app":    page("web/templates/app.html", "web/templates/instances.html", "web/templates/logs.html"),
-		"deploy": page("web/templates/deploy.html", "web/templates/deployments.html"),
+		"deploy": page("web/templates/deploy.html", "web/templates/deployments.html", "web/templates/deploy_source.html"),
 		"login":  page("web/templates/login.html"),
 		"setup":  page("web/templates/setup.html"),
 		// standalone partials for htmx polling
-		"apps_table":  template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/apps_table.html")),
-		"instances":   template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/instances.html")),
-		"logs":        template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/logs.html")),
-		"deployments": template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/deployments.html")),
+		"apps_table":    template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/apps_table.html")),
+		"instances":     template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/instances.html")),
+		"logs":          template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/logs.html")),
+		"deployments":   template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/deployments.html")),
+		"deploy_source": template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/deploy_source.html")),
 	}
 }
 
@@ -149,6 +238,21 @@ type pageData struct {
 	RegistryErr     string
 	DeployErr       string
 	Deployments     []plystate.Deployment
+	Source          *sourceForm
+}
+
+// sourceForm is the from-source wizard's state: inspection result plus the
+// form exactly as typed, so error re-renders never lose input.
+type sourceForm struct {
+	RepoURL    string
+	Insp       github.Inspection
+	Inspected  bool
+	Frameworks []string
+	Framework  string
+	Spec       plystate.SourceSpec
+	Key        string
+	Preview    string
+	Error      string
 }
 
 func (s *server) render(w http.ResponseWriter, page, name string, data pageData) {
@@ -348,6 +452,14 @@ func (s *server) deployCreate(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/deploy", http.StatusSeeOther)
 }
 
+// deployNow: the update button — touch the spec, inotify does the rest.
+func (s *server) deployNow(w http.ResponseWriter, r *http.Request) {
+	if err := plystate.TouchDeployment(s.paths, r.PathValue("name")); err != nil {
+		log.Printf("deploy now: %v", err)
+	}
+	http.Redirect(w, r, "/deploy", http.StatusSeeOther)
+}
+
 func (s *server) deployDelete(w http.ResponseWriter, r *http.Request) {
 	if err := plystate.DeleteDeployment(s.paths, r.PathValue("name")); err != nil {
 		log.Printf("delete deployment: %v", err)
@@ -359,6 +471,152 @@ func (s *server) deploymentsPartial(w http.ResponseWriter, _ *http.Request) {
 	s.render(w, "deployments", "deployments", pageData{
 		Deployments: plystate.Deployments(s.paths),
 	})
+}
+
+// --- the from-source wizard --------------------------------------------------
+
+func (s *server) renderSource(w http.ResponseWriter, form *sourceForm) {
+	form.Frameworks = github.Frameworks()
+	s.render(w, "deploy_source", "deploy_source", pageData{Source: form})
+}
+
+// sourceInspect answers both the inspect button and a preset switch (the
+// latter arrives with inspected=1 and keeps everything but preset fields).
+func (s *server) sourceInspect(w http.ResponseWriter, r *http.Request) {
+	repoURL := strings.TrimSpace(r.FormValue("repo"))
+	form := &sourceForm{RepoURL: repoURL}
+	if repoURL == "" {
+		form.Error = "paste a repo URL first"
+		s.renderSource(w, form)
+		return
+	}
+	insp, err := github.Inspect(repoURL)
+	if err != nil {
+		form.Error = err.Error()
+		s.renderSource(w, form)
+		return
+	}
+	form.Insp = insp
+	form.Inspected = true
+	form.Framework = insp.Framework
+	if fw := r.FormValue("framework"); fw != "" {
+		form.Framework = fw
+	}
+
+	spec := plystate.SourceSpec{}
+	if r.FormValue("inspected") == "1" {
+		spec = specFromForm(r) // preset switch: keep what the user typed
+	} else {
+		spec.Name = nameFromRepo(insp.CloneURL)
+		spec.Ref = insp.DefaultBranch
+	}
+	preset := github.PresetFor(form.Framework)
+	spec.Build, spec.Runtime = preset.Build, preset.Runtime
+	spec.Entrypoint, spec.Include, spec.Port = preset.Entrypoint, preset.Include, preset.Port
+	if spec.Publish == "" && preset.Port != "" {
+		spec.Publish = "internal:" + preset.Port
+	}
+	spec.Repo = insp.CloneURL
+	form.Spec = spec
+	form.Key = r.FormValue("key")
+	form.Preview = previewOf(spec, form.Key, insp.SSHURL)
+	s.renderSource(w, form)
+}
+
+func (s *server) sourcePreview(w http.ResponseWriter, r *http.Request) {
+	spec := specFromForm(r)
+	applyKey(&spec, strings.TrimSpace(r.FormValue("key")), r.FormValue("ssh_url"))
+	text, err := spec.Render()
+	if err != nil {
+		fmt.Fprintf(w, `<div class="text-amber-400/90">%s</div>`, template.HTMLEscapeString(err.Error()))
+		return
+	}
+	fmt.Fprintf(w, `<pre class="border border-zinc-800 rounded px-3 py-2 text-zinc-400 overflow-x-auto">%s</pre>`, template.HTMLEscapeString(text))
+}
+
+func (s *server) sourceCreate(w http.ResponseWriter, r *http.Request) {
+	spec := specFromForm(r)
+	key := strings.TrimSpace(r.FormValue("key"))
+	sshURL := r.FormValue("ssh_url")
+	form := &sourceForm{
+		RepoURL:   r.FormValue("repo"),
+		Insp:      github.Inspection{SSHURL: sshURL},
+		Inspected: true,
+		Framework: r.FormValue("framework"),
+		Spec:      spec,
+		Key:       key,
+	}
+	fail := func(err error) {
+		form.Error = err.Error()
+		form.Preview = previewOf(spec, key, sshURL)
+		s.renderSource(w, form)
+	}
+	applyKey(&spec, key, sshURL)
+	if _, err := spec.Render(); err != nil { // validate before touching disk
+		fail(err)
+		return
+	}
+	if key != "" {
+		ref, err := plystate.WriteDeployKey(s.paths, spec.Name, key)
+		if err != nil {
+			fail(err)
+			return
+		}
+		spec.DeployKey = ref
+	}
+	if err := plystate.WriteSourceDeployment(s.paths, spec); err != nil {
+		fail(err)
+		return
+	}
+	w.Header().Set("HX-Redirect", "/deploy")
+}
+
+// applyKey mirrors create-time behavior into previews: a pasted key means
+// the ssh URL and a .keys reference land in the spec.
+func applyKey(spec *plystate.SourceSpec, key, sshURL string) {
+	if key == "" {
+		return
+	}
+	spec.DeployKey = ".keys/" + spec.Name
+	if sshURL != "" {
+		spec.Repo = sshURL
+	}
+}
+
+func previewOf(spec plystate.SourceSpec, key, sshURL string) string {
+	applyKey(&spec, key, sshURL)
+	text, err := spec.Render()
+	if err != nil {
+		return ""
+	}
+	return text
+}
+
+func specFromForm(r *http.Request) plystate.SourceSpec {
+	return plystate.SourceSpec{
+		Name:       strings.TrimSpace(r.FormValue("name")),
+		Repo:       strings.TrimSpace(r.FormValue("repo")),
+		Ref:        strings.TrimSpace(r.FormValue("ref")),
+		Build:      strings.TrimSpace(r.FormValue("build")),
+		Runtime:    strings.TrimSpace(r.FormValue("runtime")),
+		Entrypoint: strings.TrimSpace(r.FormValue("entrypoint")),
+		Include:    strings.TrimSpace(r.FormValue("include")),
+		Port:       strings.TrimSpace(r.FormValue("port")),
+		Publish:    strings.TrimSpace(r.FormValue("publish")),
+		Domain:     strings.TrimSpace(r.FormValue("domain")),
+		Env:        r.FormValue("env"),
+	}
+}
+
+var nameSanitize = regexp.MustCompile(`[^a-z0-9-]+`)
+
+func nameFromRepo(repo string) string {
+	base := strings.ToLower(path.Base(strings.TrimSuffix(repo, ".git")))
+	base = strings.Trim(nameSanitize.ReplaceAllString(base, "-"), "-")
+	if base == "" {
+		base = "app"
+	}
+	return base
 }
 
 // logLines merges instance rings, prefixing when there are several.

@@ -56,7 +56,9 @@
 {{end}}
 </div>
 
-<div class="mt-4 text-zinc-700 text-xs">from GitHub — coming soon (a spec with <span class="text-zinc-500">image = "github:org/repo@vX"</span> already works by hand)</div>
+<h2 class="text-zinc-500 text-xs uppercase tracking-widest mt-10 mb-3">new deployment · from source</h2>
+<div class="text-zinc-600 text-xs mb-3">paste a repo — the droplet clones and builds it, no CI needed; public repos are inspected for a preset</div>
+{{template "deploy_source" .}}
 
 <h2 class="text-zinc-500 text-xs uppercase tracking-widest mt-10 mb-3">deployments on this host</h2>
 <div hx-get="/partials/deployments" hx-trigger="every 3s" hx-swap="innerHTML">
