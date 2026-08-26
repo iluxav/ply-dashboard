@@ -20,6 +20,11 @@ import (
 	"github.com/iluxav/ply-dashboard/internal/auth"
 	"github.com/iluxav/ply-dashboard/internal/plystate"
 	"github.com/iluxav/ply-dashboard/internal/registry"
+
+	// The debian-slim base ships no CA bundle; these are the Mozilla roots
+	// compiled into the binary, used only when the system pool is empty —
+	// TLS (the registry catalog) works in a minimal container.
+	_ "golang.org/x/crypto/x509roots/fallback"
 )
 
 //go:embed web

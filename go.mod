@@ -4,5 +4,6 @@ go 1.26.2
 
 require (
 	golang.org/x/crypto v0.55.0 // indirect
+	golang.org/x/crypto/x509roots/fallback v0.0.0-20260824205408-89f4e9bb5b38 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 )
