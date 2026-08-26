@@ -1,0 +1,7 @@
+{{define "title"}}ply · apps{{end}}
+{{define "crumb"}}apps{{end}}
+{{define "content"}}
+<div hx-get="/partials/apps" hx-trigger="every 3s" hx-swap="innerHTML">
+  {{template "apps_table" .}}
+</div>
+{{end}}

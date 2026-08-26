@@ -1,0 +1,44 @@
+# Tag vX.Y.Z → build the static binary + both-arch ply images, attach to the
+# release. The version guard mirrors ply's: a tag that disagrees with the
+# manifest publishes a dead URL for consumers.
+name: release
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions: { contents: write }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.26" }
+
+      - name: install ply + tailwind
+        run: |
+          curl -fsSL https://plybox.sh/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          curl -fsSL -o bin/tailwindcss https://github.com/tailwindlabs/tailwindcss/releases/download/v3.4.17/tailwindcss-linux-x64
+          chmod +x bin/tailwindcss
+
+      - name: version guard
+        run: |
+          V=$(sed -n 's/^version = "\(.*\)"/\1/p' ply.toml | head -1)
+          [ "v$V" = "$GITHUB_REF_NAME" ] || { echo "::error::tag $GITHUB_REF_NAME != ply.toml version v$V"; exit 1; }
+
+      - name: test
+        run: make test
+
+      - name: build images (x64 + arm64)
+        run: |
+          V=${GITHUB_REF_NAME#v}
+          make build VERSION=$V
+          ply build . --arch x64
+          ply build . --arch arm64
+
+      - name: attach to release
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          gh release create "$GITHUB_REF_NAME" --generate-notes || true
+          gh release upload "$GITHUB_REF_NAME" dashboard-*-linux-*.img --clobber

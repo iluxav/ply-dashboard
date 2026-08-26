@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{block "title" .}}ply{{end}}</title>
+<link rel="stylesheet" href="/assets/app.css">
+<script src="/assets/htmx.min.js" defer></script>
+</head>
+<body class="bg-zinc-950 text-zinc-300 font-mono text-sm min-h-screen">
+<div class="max-w-5xl mx-auto px-4 py-6">
+  <header class="flex items-baseline justify-between border-b border-zinc-800 pb-3 mb-6">
+    <div class="flex items-baseline gap-3">
+      <a href="/" class="text-zinc-100 font-bold tracking-tight">ply<span class="text-green-400">▮</span></a>
+      <span class="text-zinc-600 text-xs">{{block "crumb" .}}dashboard{{end}}</span>
+    </div>
+    {{if .Authed}}<form method="post" action="/logout"><button class="text-zinc-600 hover:text-zinc-300 text-xs">logout</button></form>{{end}}
+  </header>
+  {{block "content" .}}{{end}}
+  <footer class="mt-10 pt-3 border-t border-zinc-900 text-zinc-700 text-xs flex justify-between">
+    <span>everything is a file</span>
+    <span>{{.Version}}</span>
+  </footer>
+</div>
+<script>
+function copyCmd(btn){
+  navigator.clipboard.writeText(btn.dataset.cmd).then(()=>{
+    const t=btn.textContent; btn.textContent='copied'; setTimeout(()=>btn.textContent=t,900);
+  });
+}
+</script>
+</body>
+</html>

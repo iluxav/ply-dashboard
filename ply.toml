@@ -1,0 +1,40 @@
+# ply-dashboard — the opt-in web UI that is just a ply app.
+#
+#   ply run dashboard@0.1 --grant-links --publish internal:7070 --domain ply.example.com
+#
+# [requests] declares the read surfaces; --grant-links is the operator's yes.
+# Dev on a rootless box: ply.dev.toml overrides the links (ply run . there).
+
+[package]
+name = "dashboard"
+version = "0.1.0"
+entrypoint = ["./ply-dashboard"]
+include = ["ply-dashboard"]
+base = "debian@13"
+
+[env]
+DATA_DIR = "/data"
+
+[ports]
+web = 7070
+
+[health]
+port = 7070
+grace = "10s"
+
+[restart]
+policy = "on-failure"
+
+[volumes]
+data = { path = "/data" }
+
+[sources]
+default = "https://registry.plybox.sh/ply/{package}"
+
+[requests]
+links = [
+  "/run/ply:/ply/host/run",
+  "/var/lib/ply/apps:/ply/host/apps",
+  "/sys/fs/cgroup:/ply/host/cgroup",
+  "/proc:/ply/host/proc",
+]

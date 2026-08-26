@@ -1,0 +1,37 @@
+{{define "instances"}}
+<table class="w-full">
+  <thead>
+    <tr class="text-zinc-600 text-left text-xs border-b border-zinc-800">
+      <th class="py-1 pr-4 font-normal">instance</th>
+      <th class="py-1 pr-4 font-normal text-right">pid</th>
+      <th class="py-1 pr-4 font-normal">ip</th>
+      <th class="py-1 pr-4 font-normal text-right">uptime</th>
+      <th class="py-1 pr-4 font-normal text-right">restarts</th>
+      <th class="py-1 pr-4 font-normal">cpu</th>
+      <th class="py-1 font-normal">mem</th>
+    </tr>
+  </thead>
+  <tbody>
+  {{range .Instances}}
+    <tr class="border-b border-zinc-900">
+      <td class="py-1.5 pr-4">
+        <span class="{{if .Alive}}text-green-400{{else}}text-red-400{{end}}">●</span>
+        <span class="text-zinc-100 ml-1">{{.Name}}</span>
+      </td>
+      <td class="py-1.5 pr-4 text-right text-zinc-500">{{.PID}}</td>
+      <td class="py-1.5 pr-4 text-zinc-500">{{.IP}}</td>
+      <td class="py-1.5 pr-4 text-right text-zinc-500">{{.UptimeShort}}</td>
+      <td class="py-1.5 pr-4 text-right {{if gt .Restarts 0}}text-amber-400{{end}}">{{.Restarts}}</td>
+      {{$st := statsOf .Name}}
+      <td class="py-1.5 pr-4"><span class="text-green-500/70">{{$st.CPUSpark}}</span> <span class="text-zinc-400">{{$st.CPUNow}}</span></td>
+      <td class="py-1.5"><span class="text-sky-500/70">{{$st.MemSpark}}</span> <span class="text-zinc-400">{{$st.MemNow}}</span></td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+<div class="text-zinc-600 text-xs mt-3 space-x-4">
+  {{with .App.PublishedAddr}}<span>published <span class="text-zinc-400">{{.}}</span></span>{{end}}
+  {{range .App.Domains}}<a class="text-sky-400 hover:underline" href="https://{{.}}">{{.}}</a>{{end}}
+  <span>image <span class="text-zinc-400">{{(.App.Oldest).ImageVersion}}</span></span>
+</div>
+{{end}}

@@ -1,0 +1,306 @@
+// ply-dashboard — the opt-in web UI that is just a ply app.
+//
+// Reads ply's on-disk state through explicitly granted bind mounts, renders
+// dense server-side HTML with htmx polling, and mutates nothing (v1).
+// Single static binary, assets embedded, no database.
+package main
+
+import (
+	"embed"
+	"fmt"
+	"html/template"
+	"io/fs"
+	"log"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/iluxav/ply-dashboard/internal/auth"
+	"github.com/iluxav/ply-dashboard/internal/plystate"
+)
+
+//go:embed web
+var webFS embed.FS
+
+var version = "dev" // set by -ldflags at release
+
+type server struct {
+	paths   plystate.Paths
+	sampler *plystate.Sampler
+	auth    *auth.Auth
+	pages   map[string]*template.Template
+}
+
+func main() {
+	port := envOr("PORT", "7070")
+	dataDir := envOr("DATA_DIR", defaultDataDir())
+
+	a, err := auth.Load(dataDir)
+	if err != nil {
+		log.Fatalf("auth: %v", err)
+	}
+	paths := plystate.Resolve()
+	sampler := plystate.NewSampler(paths, 3*time.Second)
+	go sampler.Run()
+
+	s := &server{paths: paths, sampler: sampler, auth: a}
+	s.parseTemplates()
+
+	mux := http.NewServeMux()
+	assets, _ := fs.Sub(webFS, "web/assets")
+	mux.Handle("GET /assets/", http.StripPrefix("/assets/", http.FileServerFS(assets)))
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintln(w, "ok")
+	})
+
+	mux.HandleFunc("GET /setup", s.setupPage)
+	mux.HandleFunc("POST /setup", s.setupSubmit)
+	mux.HandleFunc("GET /login", s.loginPage)
+	mux.HandleFunc("POST /login", s.loginSubmit)
+	mux.HandleFunc("POST /logout", s.logout)
+
+	mux.HandleFunc("GET /{$}", s.guard(s.overview))
+	mux.HandleFunc("GET /app/{name}", s.guard(s.appPage))
+	mux.HandleFunc("GET /partials/apps", s.guard(s.appsPartial))
+	mux.HandleFunc("GET /partials/app/{name}", s.guard(s.appPartial))
+	mux.HandleFunc("GET /partials/logs/{name}", s.guard(s.logsPartial))
+
+	log.Printf("ply-dashboard %s — listening on :%s (state: %s)", version, port, paths.State)
+	log.Fatal(http.ListenAndServe(":"+port, mux))
+}
+
+// --- template plumbing -------------------------------------------------------
+
+// Each page parses base + its own file + the partials it includes; partials
+// also render standalone for htmx swaps.
+func (s *server) parseTemplates() {
+	funcs := template.FuncMap{"statsOf": s.sampler.Stats}
+	page := func(files ...string) *template.Template {
+		paths := append([]string{"web/templates/base.html"}, files...)
+		return template.Must(template.New("base.html").Funcs(funcs).ParseFS(webFS, paths...))
+	}
+	s.pages = map[string]*template.Template{
+		"index": page("web/templates/index.html", "web/templates/apps_table.html"),
+		"app":   page("web/templates/app.html", "web/templates/instances.html", "web/templates/logs.html"),
+		"login": page("web/templates/login.html"),
+		"setup": page("web/templates/setup.html"),
+		// standalone partials for htmx polling
+		"apps_table": template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/apps_table.html")),
+		"instances":  template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/instances.html")),
+		"logs":       template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/logs.html")),
+	}
+}
+
+type pageData struct {
+	Authed  bool
+	Version string
+	Error   string
+
+	Apps      []plystate.App
+	AppName   string
+	App       plystate.App
+	Instances []plystate.Instance
+	Commands  []command
+	LogLines  []string
+}
+
+func (s *server) render(w http.ResponseWriter, page, name string, data pageData) {
+	data.Version = version
+	if err := s.pages[page].ExecuteTemplate(w, name, data); err != nil {
+		log.Printf("render %s: %v", page, err)
+	}
+}
+
+// --- auth flow ---------------------------------------------------------------
+
+func (s *server) guard(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.auth.NeedsSetup() {
+			http.Redirect(w, r, "/setup", http.StatusSeeOther)
+			return
+		}
+		if !s.auth.Valid(r) {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
+		next(w, r)
+	}
+}
+
+func (s *server) setupPage(w http.ResponseWriter, r *http.Request) {
+	if !s.auth.NeedsSetup() {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	s.render(w, "setup", "base.html", pageData{})
+}
+
+func (s *server) setupSubmit(w http.ResponseWriter, r *http.Request) {
+	err := s.auth.Setup(r.FormValue("token"), r.FormValue("user"), r.FormValue("password"))
+	if err != nil {
+		s.render(w, "setup", "base.html", pageData{Error: err.Error()})
+		return
+	}
+	cookie, err := s.auth.Login(r.RemoteAddr, r.FormValue("user"), r.FormValue("password"))
+	if err == nil {
+		s.auth.SetCookie(w, cookie, secure(r))
+	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+func (s *server) loginPage(w http.ResponseWriter, r *http.Request) {
+	if s.auth.NeedsSetup() {
+		http.Redirect(w, r, "/setup", http.StatusSeeOther)
+		return
+	}
+	s.render(w, "login", "base.html", pageData{})
+}
+
+func (s *server) loginSubmit(w http.ResponseWriter, r *http.Request) {
+	cookie, err := s.auth.Login(r.RemoteAddr, r.FormValue("user"), r.FormValue("password"))
+	if err != nil {
+		s.render(w, "login", "base.html", pageData{Error: err.Error()})
+		return
+	}
+	s.auth.SetCookie(w, cookie, secure(r))
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+func (s *server) logout(w http.ResponseWriter, r *http.Request) {
+	s.auth.ClearCookie(w)
+	http.Redirect(w, r, "/login", http.StatusSeeOther)
+}
+
+func secure(r *http.Request) bool {
+	return r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+}
+
+// --- views -------------------------------------------------------------------
+
+func (s *server) overview(w http.ResponseWriter, r *http.Request) {
+	apps := s.apps()
+	s.render(w, "index", "base.html", pageData{Authed: true, Apps: apps})
+}
+
+func (s *server) appsPartial(w http.ResponseWriter, r *http.Request) {
+	s.render(w, "apps_table", "apps_table", pageData{Apps: s.apps()})
+}
+
+func (s *server) appPage(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	app, ok := s.app(name)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	s.render(w, "app", "base.html", pageData{
+		Authed:    true,
+		AppName:   name,
+		App:       app,
+		Instances: app.Instances,
+		Commands:  commandsFor(app),
+		LogLines:  s.logLines(app),
+	})
+}
+
+func (s *server) appPartial(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	app, ok := s.app(name)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	s.render(w, "instances", "instances", pageData{
+		AppName:   name,
+		App:       app,
+		Instances: app.Instances,
+	})
+}
+
+func (s *server) logsPartial(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	app, ok := s.app(name)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	s.render(w, "logs", "logs", pageData{LogLines: s.logLines(app)})
+}
+
+// logLines merges instance rings, prefixing when there are several.
+func (s *server) logLines(app plystate.App) []string {
+	prefix := len(app.Instances) > 1
+	var out []string
+	for _, inst := range app.Instances {
+		for _, line := range plystate.LogTail(s.paths, inst.App, inst.N, 150) {
+			if prefix {
+				out = append(out, inst.Name()+" | "+line)
+			} else {
+				out = append(out, line)
+			}
+		}
+	}
+	if len(out) > 300 {
+		out = out[len(out)-300:]
+	}
+	return out
+}
+
+func (s *server) apps() []plystate.App {
+	instances, err := plystate.List(s.paths)
+	if err != nil {
+		log.Printf("state: %v", err)
+	}
+	return plystate.Apps(instances)
+}
+
+func (s *server) app(name string) (plystate.App, bool) {
+	for _, a := range s.apps() {
+		if a.Name == name {
+			return a, true
+		}
+	}
+	return plystate.App{}, false
+}
+
+// --- the command panel: v1's honest mutation story ---------------------------
+
+type command struct {
+	Cmd  string
+	What string
+}
+
+func commandsFor(a plystate.App) []command {
+	name := a.Name
+	image := a.Oldest().Image
+	return []command{
+		{fmt.Sprintf("ply logs %s -f", name), "follow output in the terminal"},
+		{fmt.Sprintf("ply deploy %s", image), "roll to a new build of this image path"},
+		{fmt.Sprintf("ply exec %s sh", name), "shell into instance 1"},
+		{fmt.Sprintf("journalctl -u ply-%s -f", name), "follow logs (systemd hosts)"},
+		{fmt.Sprintf("ply stats %s", name), "live cpu/mem/net in the terminal"},
+		{fmt.Sprintf("ply rm %s", name), "stop and remove (volumes kept)"},
+	}
+}
+
+// --- misc --------------------------------------------------------------------
+
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
+func defaultDataDir() string {
+	// the ply volume in production; a local dir in dev
+	if info, err := os.Stat("/data"); err == nil && info.IsDir() {
+		return "/data"
+	}
+	dir := ".ply-dashboard-data"
+	_ = os.MkdirAll(dir, 0o700)
+	return dir
+}
+
+var _ = strings.TrimSpace // reserved

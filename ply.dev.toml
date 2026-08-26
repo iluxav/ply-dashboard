@@ -1,0 +1,11 @@
+# dev overlay — grants the dashboard its read surfaces on THIS machine
+# (rootless paths). Applied by `ply run .` only; never ships in the image.
+links = [
+  "/run/user/1000/ply:/ply/host/run",
+  "/home/iluxa/.local/share/ply/apps:/ply/host/apps",
+  "/sys/fs/cgroup:/ply/host/cgroup",
+  "/proc:/ply/host/proc",
+]
+
+[env]
+PORT = 7072

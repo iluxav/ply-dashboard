@@ -1,0 +1,5 @@
+/ply-dashboard
+*.img
+/bin/tailwindcss
+/.ply-dashboard-data
+ply.lock
