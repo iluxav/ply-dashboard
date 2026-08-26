@@ -13,6 +13,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -44,11 +45,26 @@ func main() {
 	port := envOr("PORT", "7070")
 	dataDir := envOr("DATA_DIR", defaultDataDir())
 
+	// MOCK=true: design mode — a fabricated state tree kept alive by a
+	// puppeteer goroutine, no ply CLI needed. Auth and data are sandboxed
+	// to a mock dir (login mock/mockmock) so real state is never touched.
+	mock := os.Getenv("MOCK") == "true" || os.Getenv("MOCK") == "1"
+	if mock {
+		dataDir = filepath.Join(os.TempDir(), "ply-dashboard-mock", "data")
+		if err := auth.Seed(dataDir, "mock", "mockmock"); err != nil {
+			log.Fatalf("mock auth: %v", err)
+		}
+	}
+
 	a, err := auth.Load(dataDir)
 	if err != nil {
 		log.Fatalf("auth: %v", err)
 	}
 	paths := plystate.Resolve()
+	if mock {
+		paths = plystate.StartMock()
+		log.Printf("MOCK — fabricated state at %s, login mock / mockmock", paths.State)
+	}
 	sampler := plystate.NewSampler(paths, 3*time.Second)
 	go sampler.Run()
 

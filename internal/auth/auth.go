@@ -116,6 +116,30 @@ func (a *Auth) Setup(token, user, password string) error {
 	return nil
 }
 
+// Seed writes the account file directly — mock/dev bootstrap, not a login
+// path. No-op when an account already exists, so sessions survive restarts.
+func Seed(dir, user, password string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	path := filepath.Join(dir, "auth.json")
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	}
+	salt := randomBytes(16)
+	rec := record{
+		User:       user,
+		Salt:       base64.StdEncoding.EncodeToString(salt),
+		Hash:       base64.StdEncoding.EncodeToString(hash(password, salt)),
+		SessionKey: randomToken(32),
+	}
+	raw, err := json.MarshalIndent(rec, "", " ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, raw, 0o600)
+}
+
 // Login checks credentials (rate-limited) and returns a session cookie value.
 func (a *Auth) Login(remoteAddr, user, password string) (string, error) {
 	a.mu.Lock()

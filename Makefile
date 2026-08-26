@@ -1,6 +1,6 @@
 VERSION ?= 0.1.0
 
-.PHONY: build css run test img clean
+.PHONY: build css run mock test img clean
 
 css:
 	./bin/tailwindcss -i web/input.css -o web/assets/app.css --minify
@@ -14,6 +14,10 @@ test:
 # dev loop against the host's own ply state
 run: build
 	PORT=7070 ./ply-dashboard
+
+# design loop against fabricated state — no ply needed; login mock/mockmock
+mock: build
+	MOCK=true PORT=7077 ./ply-dashboard
 
 img: build
 	ply build .
