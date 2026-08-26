@@ -12,6 +12,7 @@
   <header class="flex items-baseline justify-between border-b border-zinc-800 pb-3 mb-6">
     <div class="flex items-baseline gap-3">
       <a href="/" class="text-zinc-100 font-bold tracking-tight">ply<span class="text-green-400">▮</span></a>
+      <a href="/deploy" class="text-zinc-500 hover:text-zinc-200 text-xs">deploy</a>
       <span class="text-zinc-600 text-xs">{{block "crumb" .}}dashboard{{end}}</span>
     </div>
     {{if .Authed}}<form method="post" action="/logout"><button class="text-zinc-600 hover:text-zinc-300 text-xs">logout</button></form>{{end}}

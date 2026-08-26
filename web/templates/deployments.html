@@ -1,0 +1,25 @@
+{{define "deployments"}}
+{{if not .Deployments}}
+<div class="text-zinc-600 text-xs">none — deploy something above, or drop a .toml in the deployments dir over ssh</div>
+{{else}}
+<div class="space-y-2">
+{{range .Deployments}}
+  <div class="border border-zinc-800 rounded px-3 py-2">
+    <div class="flex items-center gap-3">
+      <a href="/app/{{.Name}}" class="text-zinc-100 hover:underline">{{.Name}}</a>
+      {{with .Status}}
+        <span class="text-xs {{if .OK}}text-green-500/80{{else}}text-red-400{{end}}">{{.}}</span>
+      {{else}}
+        <span class="text-xs text-zinc-600">waiting for reconcile…</span>
+      {{end}}
+      <form method="post" action="/deploy/{{.Name}}/delete" class="ml-auto"
+            onsubmit="return confirm('Delete deployment {{.Name}}? The app stops and its unit is removed (volumes kept).')">
+        <button class="text-zinc-600 hover:text-red-400 text-xs">delete</button>
+      </form>
+    </div>
+    <pre class="text-zinc-600 text-xs mt-1 overflow-x-auto">{{.Spec}}</pre>
+  </div>
+{{end}}
+</div>
+{{end}}
+{{end}}

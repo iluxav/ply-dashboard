@@ -18,11 +18,12 @@ import (
 // explicit --link grants under /ply/host; on a bare host (dev) they are
 // probed from ply's own conventions.
 type Paths struct {
-	State  string // instance state JSONs
-	Logs   string // per-instance log rings (<app>.<n>.log)
-	Apps   string // app dirs (deploy pointers, control/)
-	Cgroup string // cgroup v2 root
-	Proc   string // host procfs (aliveness, rootless stats fallback)
+	State       string // instance state JSONs
+	Logs        string // per-instance log rings (<app>.<n>.log)
+	Apps        string // app dirs (deploy pointers, control/)
+	Deployments string // declarative deployments (a deployment is a file)
+	Cgroup      string // cgroup v2 root
+	Proc        string // host procfs (aliveness, rootless stats fallback)
 }
 
 // Resolve prefers the container grants; on a bare host, `PLY_STATE_DIR`
@@ -32,19 +33,21 @@ type Paths struct {
 func Resolve() Paths {
 	if dirExists("/ply/host/run/state") {
 		return Paths{
-			State:  "/ply/host/run/state",
-			Logs:   "/ply/host/run/logs",
-			Apps:   "/ply/host/apps",
-			Cgroup: "/ply/host/cgroup",
-			Proc:   "/ply/host/proc",
+			State:       "/ply/host/run/state",
+			Logs:        "/ply/host/run/logs",
+			Apps:        "/ply/host/apps",
+			Deployments: "/ply/host/deployments",
+			Cgroup:      "/ply/host/cgroup",
+			Proc:        "/ply/host/proc",
 		}
 	}
 	rootful := Paths{
-		State:  "/run/ply/state",
-		Logs:   "/run/ply/logs",
-		Apps:   "/var/lib/ply/apps",
-		Cgroup: "/sys/fs/cgroup",
-		Proc:   "/proc",
+		State:       "/run/ply/state",
+		Logs:        "/run/ply/logs",
+		Apps:        "/var/lib/ply/apps",
+		Deployments: "/var/lib/ply/deployments",
+		Cgroup:      "/sys/fs/cgroup",
+		Proc:        "/proc",
 	}
 	run := os.Getenv("XDG_RUNTIME_DIR")
 	if run == "" {
@@ -54,11 +57,12 @@ func Resolve() Paths {
 	}
 	home, _ := os.UserHomeDir()
 	rootless := Paths{
-		State:  filepath.Join(run, "state"),
-		Logs:   filepath.Join(run, "logs"),
-		Apps:   filepath.Join(home, ".local/share/ply/apps"),
-		Cgroup: "/sys/fs/cgroup",
-		Proc:   "/proc",
+		State:       filepath.Join(run, "state"),
+		Logs:        filepath.Join(run, "logs"),
+		Apps:        filepath.Join(home, ".local/share/ply/apps"),
+		Deployments: filepath.Join(home, ".local/share/ply/deployments"),
+		Cgroup:      "/sys/fs/cgroup",
+		Proc:        "/proc",
 	}
 	if dir := os.Getenv("PLY_STATE_DIR"); dir != "" {
 		p := rootful

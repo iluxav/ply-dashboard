@@ -19,6 +19,7 @@ import (
 
 	"github.com/iluxav/ply-dashboard/internal/auth"
 	"github.com/iluxav/ply-dashboard/internal/plystate"
+	"github.com/iluxav/ply-dashboard/internal/registry"
 )
 
 //go:embed web
@@ -27,10 +28,11 @@ var webFS embed.FS
 var version = "dev" // set by -ldflags at release
 
 type server struct {
-	paths   plystate.Paths
-	sampler *plystate.Sampler
-	auth    *auth.Auth
-	pages   map[string]*template.Template
+	paths    plystate.Paths
+	sampler  *plystate.Sampler
+	auth     *auth.Auth
+	registry *registry.Client
+	pages    map[string]*template.Template
 }
 
 func main() {
@@ -45,7 +47,7 @@ func main() {
 	sampler := plystate.NewSampler(paths, 3*time.Second)
 	go sampler.Run()
 
-	s := &server{paths: paths, sampler: sampler, auth: a}
+	s := &server{paths: paths, sampler: sampler, auth: a, registry: registry.NewClient()}
 	s.parseTemplates()
 
 	mux := http.NewServeMux()
@@ -68,6 +70,10 @@ func main() {
 	mux.HandleFunc("GET /partials/logs/{name}", s.guard(s.logsPartial))
 	mux.HandleFunc("POST /app/{name}/scale", s.guard(s.scaleAction))
 	mux.HandleFunc("POST /app/{name}/restart", s.guard(s.restartAction))
+	mux.HandleFunc("GET /deploy", s.guard(s.deployPage))
+	mux.HandleFunc("POST /deploy", s.guard(s.deployCreate))
+	mux.HandleFunc("POST /deploy/{name}/delete", s.guard(s.deployDelete))
+	mux.HandleFunc("GET /partials/deployments", s.guard(s.deploymentsPartial))
 
 	log.Printf("ply-dashboard %s — listening on :%s (state: %s)", version, port, paths.State)
 	log.Fatal(http.ListenAndServe(":"+port, mux))
@@ -78,20 +84,26 @@ func main() {
 // Each page parses base + its own file + the partials it includes; partials
 // also render standalone for htmx swaps.
 func (s *server) parseTemplates() {
-	funcs := template.FuncMap{"statsOf": s.sampler.Stats}
+	funcs := template.FuncMap{
+		"statsOf":        s.sampler.Stats,
+		"contract":       registry.Contract,
+		"defaultPublish": registry.DefaultPublish,
+	}
 	page := func(files ...string) *template.Template {
 		paths := append([]string{"web/templates/base.html"}, files...)
 		return template.Must(template.New("base.html").Funcs(funcs).ParseFS(webFS, paths...))
 	}
 	s.pages = map[string]*template.Template{
-		"index": page("web/templates/index.html", "web/templates/apps_table.html"),
-		"app":   page("web/templates/app.html", "web/templates/instances.html", "web/templates/logs.html"),
-		"login": page("web/templates/login.html"),
-		"setup": page("web/templates/setup.html"),
+		"index":  page("web/templates/index.html", "web/templates/apps_table.html"),
+		"app":    page("web/templates/app.html", "web/templates/instances.html", "web/templates/logs.html"),
+		"deploy": page("web/templates/deploy.html", "web/templates/deployments.html"),
+		"login":  page("web/templates/login.html"),
+		"setup":  page("web/templates/setup.html"),
 		// standalone partials for htmx polling
-		"apps_table": template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/apps_table.html")),
-		"instances":  template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/instances.html")),
-		"logs":       template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/logs.html")),
+		"apps_table":  template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/apps_table.html")),
+		"instances":   template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/instances.html")),
+		"logs":        template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/logs.html")),
+		"deployments": template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/deployments.html")),
 	}
 }
 
@@ -110,6 +122,12 @@ type pageData struct {
 	ScaleUp    int
 	ScaleDown  int
 	LastResult *plystate.CommandResult
+
+	DeployAvailable bool
+	RegistryApps    []registry.App
+	RegistryErr     string
+	DeployErr       string
+	Deployments     []plystate.Deployment
 }
 
 func (s *server) render(w http.ResponseWriter, page, name string, data pageData) {
@@ -269,6 +287,57 @@ func (s *server) logsPartial(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.render(w, "logs", "logs", pageData{LogLines: s.logLines(app)})
+}
+
+func (s *server) deployPage(w http.ResponseWriter, r *http.Request) {
+	s.renderDeploy(w, r.URL.Query().Get("err"))
+}
+
+func (s *server) renderDeploy(w http.ResponseWriter, deployErr string) {
+	data := pageData{
+		Authed:          true,
+		DeployAvailable: plystate.DeploymentsAvailable(s.paths),
+		Deployments:     plystate.Deployments(s.paths),
+		DeployErr:       deployErr,
+	}
+	if data.DeployAvailable {
+		apps, err := s.registry.Apps()
+		data.RegistryApps = apps
+		if err != nil {
+			data.RegistryErr = err.Error()
+		}
+	}
+	s.render(w, "deploy", "base.html", data)
+}
+
+func (s *server) deployCreate(w http.ResponseWriter, r *http.Request) {
+	err := plystate.WriteDeployment(
+		s.paths,
+		strings.TrimSpace(r.FormValue("name")),
+		strings.TrimSpace(r.FormValue("app")),
+		strings.TrimSpace(r.FormValue("version")),
+		strings.TrimSpace(r.FormValue("publish")),
+		strings.TrimSpace(r.FormValue("domain")),
+		r.FormValue("env"),
+	)
+	if err != nil {
+		http.Redirect(w, r, "/deploy?err="+template.URLQueryEscaper(err.Error()), http.StatusSeeOther)
+		return
+	}
+	http.Redirect(w, r, "/deploy", http.StatusSeeOther)
+}
+
+func (s *server) deployDelete(w http.ResponseWriter, r *http.Request) {
+	if err := plystate.DeleteDeployment(s.paths, r.PathValue("name")); err != nil {
+		log.Printf("delete deployment: %v", err)
+	}
+	http.Redirect(w, r, "/deploy", http.StatusSeeOther)
+}
+
+func (s *server) deploymentsPartial(w http.ResponseWriter, _ *http.Request) {
+	s.render(w, "deployments", "deployments", pageData{
+		Deployments: plystate.Deployments(s.paths),
+	})
 }
 
 // logLines merges instance rings, prefixing when there are several.

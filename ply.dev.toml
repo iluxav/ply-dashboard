@@ -3,6 +3,7 @@
 links = [
   "/run/user/1000/ply:/ply/host/run",
   "/home/iluxa/.local/share/ply/apps:/ply/host/apps",
+  "/home/iluxa/.local/share/ply/deployments:/ply/host/deployments",
   "/sys/fs/cgroup:/ply/host/cgroup",
   "/proc:/ply/host/proc",
 ]

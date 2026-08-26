@@ -7,7 +7,7 @@
 
 [package]
 name = "dashboard"
-version = "0.1.1"
+version = "0.1.2"
 entrypoint = ["./ply-dashboard"]
 include = ["ply-dashboard"]
 base = "debian@13"
@@ -35,6 +35,7 @@ default = "https://registry.plybox.sh/ply/{package}"
 links = [
   "/run/ply:/ply/host/run",
   "/var/lib/ply/apps:/ply/host/apps",
+  "/var/lib/ply/deployments:/ply/host/deployments",
   "/sys/fs/cgroup:/ply/host/cgroup",
   "/proc:/ply/host/proc",
 ]
