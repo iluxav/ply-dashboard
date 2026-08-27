@@ -341,3 +341,33 @@ func TestOneDeploymentAndRewrite(t *testing.T) {
 		t.Error("editing a nonexistent deployment should fail")
 	}
 }
+
+func TestStackWiring(t *testing.T) {
+	w := newMockWorld(t.TempDir())
+	svc := StackServices()[0] // postgres
+	name, err := WriteServiceSpec(w.p, "shop", svc, "pw123456")
+	if err != nil || name != "shop-db" {
+		t.Fatalf("service spec: %q %v", name, err)
+	}
+	d, _ := OneDeployment(w.p, "shop-db")
+	for _, want := range []string{`app = "postgres"`, `stack = "shop"`, `POSTGRES_PASSWORD = "pw123456"`} {
+		if !strings.Contains(d.Spec, want) {
+			t.Errorf("missing %q in %s", want, d.Spec)
+		}
+	}
+
+	spec := SourceSpec{Name: "shop", Repo: "r", Build: "b", Stack: "shop", After: "postgres, redis"}
+	text, err := spec.Render()
+	if err != nil || !strings.Contains(text, `after = ["postgres", "redis"]`) || !strings.Contains(text, `stack = "shop"`) {
+		t.Errorf("render: %v\n%s", err, text)
+	}
+
+	groups := GroupDeployments([]Deployment{
+		{Name: "a", Spec: "app = \"x\"\n"},
+		{Name: "shop-db", Spec: "app = \"postgres\"\nstack = \"shop\"\n"},
+		{Name: "shop", Spec: "repo = \"r\"\nstack = \"shop\"\n"},
+	})
+	if len(groups) != 2 || groups[0].Stack != "shop" || len(groups[0].Items) != 2 || groups[1].Stack != "" {
+		t.Errorf("grouping wrong: %+v", groups)
+	}
+}

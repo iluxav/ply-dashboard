@@ -123,6 +123,18 @@
     </label>
     {{end}}
 
+    <fieldset class="md:col-span-2 flex gap-5 items-baseline text-fade/50">
+      <span>needs a database?</span>
+      <label class="flex items-center gap-1.5">
+        <input type="checkbox" name="svc_postgres" value="1">
+        + postgres <span class="text-fade/35">(creates &lt;name&gt;-db, wires POSTGRES_* into your app)</span>
+      </label>
+      <label class="flex items-center gap-1.5">
+        <input type="checkbox" name="svc_redis" value="1">
+        + redis <span class="text-fade/35">(creates &lt;name&gt;-cache)</span>
+      </label>
+    </fieldset>
+
     <label class="flex items-center gap-1.5 text-fade/50 md:col-span-2">
       <input type="checkbox" name="manual" value="1" {{if eq .Lane "release"}}{{if .Gh.Manual}}checked{{end}}{{else}}{{if .Spec.Manual}}checked{{end}}{{end}}>
       manual updates only — the timer leaves this deployment alone; deploy-now (or touching the file) still converges it

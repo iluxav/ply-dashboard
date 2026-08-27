@@ -127,6 +127,90 @@ func RewriteDeployment(p Paths, name, spec string) error {
 	return os.Rename(tmp, filepath.Join(p.Deployments, name+".toml"))
 }
 
+// writeList renders `key = ["a", "b"]` from a comma-separated string.
+func writeList(b *strings.Builder, key, csv string) {
+	items := splitList(csv)
+	if len(items) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "%s = [", key)
+	for i, it := range items {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		fmt.Fprintf(b, "%q", it)
+	}
+	b.WriteString("]\n")
+}
+
+// Service catalog for the wizard's "needs a database?" step: the app
+// name inside the image, the deployment-name suffix, port, and the env
+// contract (password shared with the main app so it can connect via the
+// discovery vars `<APP>_HOST` / `<APP>_PORT`).
+type StackService struct {
+	App     string // registry app + `after` target + discovery-var prefix
+	Suffix  string // deployment name: <stack><suffix>
+	Publish string
+	EnvKey  string // password variable shared app <-> service
+}
+
+func StackServices() []StackService {
+	return []StackService{
+		{App: "postgres", Suffix: "-db", Publish: "internal:5432", EnvKey: "POSTGRES_PASSWORD"},
+		{App: "redis", Suffix: "-cache", Publish: "internal:6379", EnvKey: "REDIS_PASSWORD"},
+	}
+}
+
+// WriteServiceSpec lands one stack member: a registry service wired into
+// the group. Returns the deployment name it created.
+func WriteServiceSpec(p Paths, stack string, svc StackService, password string) (string, error) {
+	name := stack + svc.Suffix
+	if !deployName.MatchString(name) {
+		return "", fmt.Errorf("bad service deployment name %q", name)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "app = %q\n", svc.App)
+	fmt.Fprintf(&b, "stack = %q\n", stack)
+	fmt.Fprintf(&b, "publish = [%q]\n", svc.Publish)
+	fmt.Fprintf(&b, "\n[env]\n%s = %q\n", svc.EnvKey, password)
+	tmp := filepath.Join(p.Deployments, "."+name+".toml.tmp")
+	if err := os.WriteFile(tmp, []byte(b.String()), 0o600); err != nil {
+		return "", err
+	}
+	return name, os.Rename(tmp, filepath.Join(p.Deployments, name+".toml"))
+}
+
+// DeploymentGroup: deployments sharing a stack label render together;
+// the "" group is the standalone rows.
+type DeploymentGroup struct {
+	Stack string
+	Items []Deployment
+}
+
+func GroupDeployments(list []Deployment) []DeploymentGroup {
+	byStack := map[string][]Deployment{}
+	var order []string
+	for _, d := range list {
+		s := d.Field("stack")
+		if _, ok := byStack[s]; !ok {
+			order = append(order, s)
+		}
+		byStack[s] = append(byStack[s], d)
+	}
+	sort.Slice(order, func(a, b int) bool {
+		// standalone rows last, stacks alphabetical first
+		if (order[a] == "") != (order[b] == "") {
+			return order[a] != ""
+		}
+		return order[a] < order[b]
+	})
+	out := make([]DeploymentGroup, 0, len(order))
+	for _, s := range order {
+		out = append(out, DeploymentGroup{Stack: s, Items: byStack[s]})
+	}
+	return out
+}
+
 // renderEnv appends an [env] table from KEY=VALUE lines; blank values and
 // comments are dropped (unfilled form rows), first duplicate wins.
 func renderEnv(b *strings.Builder, envLines string) {
@@ -271,6 +355,8 @@ type SourceSpec struct {
 	Domain     string
 	Env        string // KEY=VALUE lines
 	Manual     bool   // render auto = false: converge only on touch/deploy-now
+	Stack      string // grouping label (stacks render together)
+	After      string // comma-separated app names to wait healthy for
 }
 
 // Render validates and returns the exact TOML the deployment file will
@@ -308,6 +394,8 @@ func (s SourceSpec) Render() (string, error) {
 	if s.Manual {
 		b.WriteString("auto = false\n")
 	}
+	writeOpt("stack", s.Stack)
+	writeList(&b, "after", s.After)
 	writeOpt("ref", s.Ref)
 	writeOpt("deploy_key", s.DeployKey)
 	writeOpt("token_file", s.TokenFile)
@@ -380,7 +468,9 @@ type GithubSpec struct {
 	Publish   string
 	Domain    string
 	Env       string
-	Manual    bool // render auto = false: converge only on touch/deploy-now
+	Manual    bool   // render auto = false: converge only on touch/deploy-now
+	Stack     string // grouping label
+	After     string // comma-separated app names to wait healthy for
 }
 
 var orgRepo = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
@@ -403,6 +493,8 @@ func (s GithubSpec) Render() (string, error) {
 	if s.Manual {
 		b.WriteString("auto = false\n")
 	}
+	writeOpt("stack", s.Stack)
+	writeList(&b, "after", s.After)
 	if strings.TrimSpace(s.Asset) != s.Name {
 		writeOpt("asset", s.Asset)
 	}

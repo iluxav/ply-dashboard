@@ -318,6 +318,7 @@ type pageData struct {
 	RegistryErr     string
 	DeployErr       string
 	Deployments     []plystate.Deployment
+	Groups          []plystate.DeploymentGroup
 	Source          *sourceForm
 	Events          []plystate.Event
 }
@@ -587,7 +588,7 @@ func (s *server) renderDeploy(w http.ResponseWriter, deployErr string) {
 	data := pageData{
 		Authed:          true,
 		DeployAvailable: plystate.DeploymentsAvailable(s.paths),
-		Deployments:     plystate.Deployments(s.paths),
+		Groups:          plystate.GroupDeployments(plystate.Deployments(s.paths)),
 		DeployErr:       deployErr,
 		Fleet:           plystate.Fleet(s.paths),
 	}
@@ -668,7 +669,7 @@ func (s *server) deployDelete(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) deploymentsPartial(w http.ResponseWriter, _ *http.Request) {
 	s.render(w, "deployments", "deployments", pageData{
-		Deployments: plystate.Deployments(s.paths),
+		Groups: plystate.GroupDeployments(plystate.Deployments(s.paths)),
 	})
 }
 
@@ -776,8 +777,13 @@ func (s *server) sourceCreate(w http.ResponseWriter, r *http.Request) {
 		fail(err)
 		return
 	}
+	services := selectedServices(r)
 	if lane == "release" {
 		gh := form.Gh
+		if err := s.wireStack(gh.Name, services, &gh.Stack, &gh.After, &gh.Env); err != nil {
+			fail(err)
+			return
+		}
 		if token != "" {
 			ref, err := plystate.WriteToken(s.paths, gh.Name, token)
 			if err != nil {
@@ -792,6 +798,10 @@ func (s *server) sourceCreate(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		spec := form.Spec
+		if err := s.wireStack(spec.Name, services, &spec.Stack, &spec.After, &spec.Env); err != nil {
+			fail(err)
+			return
+		}
 		if token != "" {
 			ref, err := plystate.WriteToken(s.paths, spec.Name, token)
 			if err != nil {
@@ -865,6 +875,43 @@ func specFromForm(r *http.Request) plystate.SourceSpec {
 		Env:        r.FormValue("env"),
 		Manual:     r.FormValue("manual") == "1",
 	}
+}
+
+// selectedServices reads the wizard's "needs a database?" checkboxes.
+func selectedServices(r *http.Request) []plystate.StackService {
+	var out []plystate.StackService
+	for _, svc := range plystate.StackServices() {
+		if r.FormValue("svc_"+svc.App) == "1" {
+			out = append(out, svc)
+		}
+	}
+	return out
+}
+
+// wireStack decorates the main spec for its services and writes the
+// service specs. One generated password per service, shared with the app
+// through [env] — the app finds the address via the discovery vars
+// (<APP>_HOST/_PORT) that `after` injects at start.
+func (s *server) wireStack(name string, services []plystate.StackService, stack, after, env *string) error {
+	if len(services) == 0 {
+		return nil
+	}
+	*stack = name
+	var afters []string
+	for _, svc := range services {
+		password := make([]byte, 12)
+		if _, err := rand.Read(password); err != nil {
+			return err
+		}
+		pw := hex.EncodeToString(password)
+		if _, err := plystate.WriteServiceSpec(s.paths, name, svc, pw); err != nil {
+			return err
+		}
+		afters = append(afters, svc.App)
+		*env = strings.TrimRight(*env, "\n") + "\n" + svc.EnvKey + "=" + pw + "\n"
+	}
+	*after = strings.Join(afters, ", ")
+	return nil
 }
 
 func githubFromForm(r *http.Request) plystate.GithubSpec {

@@ -1,9 +1,17 @@
 {{define "deployments"}}
-{{if not .Deployments}}
+{{if not .Groups}}
 <div class="text-fade/50 text-xs">none — deploy something above, or drop a .toml in the deployments dir over ssh</div>
 {{else}}
-<div class="space-y-2">
-{{range .Deployments}}
+<div class="space-y-4">
+{{range .Groups}}
+{{if .Stack}}
+<div class="border border-edge/60 rounded p-2">
+  <div class="text-accent/70 text-[10px] uppercase tracking-wider mb-2 px-1">stack · {{.Stack}}</div>
+  <div class="space-y-2">
+{{else}}
+  <div class="space-y-2">
+{{end}}
+{{range .Items}}
   <div class="border border-edge rounded px-3 py-2">
     <div class="flex items-center gap-3">
       <a href="/app/{{.Name}}" class="text-ink hover:underline">{{.Name}}</a>
@@ -58,6 +66,9 @@
       </form>
     </details>
   </div>
+{{end}}
+  </div>
+{{if .Stack}}</div>{{end}}
 {{end}}
 </div>
 {{end}}
