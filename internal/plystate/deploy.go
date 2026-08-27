@@ -209,6 +209,7 @@ type SourceSpec struct {
 	Build      string
 	Runtime    string
 	DeployKey  string // path reference (".keys/<name>"), not the key itself
+	TokenFile  string // path reference (".keys/<name>.token") — PAT for private https
 	Entrypoint string // whitespace-split into the array form
 	Include    string // comma-split
 	Port       string
@@ -251,6 +252,7 @@ func (s SourceSpec) Render() (string, error) {
 	}
 	writeOpt("ref", s.Ref)
 	writeOpt("deploy_key", s.DeployKey)
+	writeOpt("token_file", s.TokenFile)
 	writeOpt("build", s.Build)
 	writeOpt("runtime", s.Runtime)
 	if fields := strings.Fields(s.Entrypoint); len(fields) > 0 {
@@ -306,6 +308,85 @@ func WriteSourceDeployment(p Paths, s SourceSpec) error {
 		return err
 	}
 	return os.Rename(tmp, filepath.Join(p.Deployments, s.Name+".toml"))
+}
+
+// GithubSpec is the CI-image lane as typed: the repo's releases carry the
+// .img, the droplet pulls it. Same contract as SourceSpec: strings in,
+// validation and TOML here, preview == file.
+type GithubSpec struct {
+	Name      string
+	Repo      string // org/repo
+	Asset     string // app name in <asset>-<ver>-linux-<arch>.img; blank = deployment name
+	Version   string // exact x.y.z pins; prefix follows; blank follows latest
+	TokenFile string // path reference for private repos
+	Publish   string
+	Domain    string
+	Env       string
+}
+
+var orgRepo = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
+
+func (s GithubSpec) Render() (string, error) {
+	if !deployName.MatchString(s.Name) {
+		return "", fmt.Errorf("deployment name must be [a-z0-9-], got %q", s.Name)
+	}
+	repo := strings.TrimSpace(s.Repo)
+	if !orgRepo.MatchString(repo) {
+		return "", fmt.Errorf("github repo must be org/repo, got %q", repo)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "github = %q\n", repo)
+	writeOpt := func(key, value string) {
+		if v := strings.TrimSpace(value); v != "" {
+			fmt.Fprintf(&b, "%s = %q\n", key, v)
+		}
+	}
+	if strings.TrimSpace(s.Asset) != s.Name {
+		writeOpt("asset", s.Asset)
+	}
+	writeOpt("version", s.Version)
+	writeOpt("token_file", s.TokenFile)
+	if v := strings.TrimSpace(s.Publish); v != "" {
+		fmt.Fprintf(&b, "publish = [%q]\n", v)
+	}
+	if v := strings.TrimSpace(s.Domain); v != "" {
+		fmt.Fprintf(&b, "domain = [%q]\n", v)
+	}
+	renderEnv(&b, s.Env)
+	return b.String(), nil
+}
+
+func WriteGithubDeployment(p Paths, s GithubSpec) error {
+	text, err := s.Render()
+	if err != nil {
+		return err
+	}
+	tmp := filepath.Join(p.Deployments, "."+s.Name+".toml.tmp")
+	if err := os.WriteFile(tmp, []byte(text), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, filepath.Join(p.Deployments, s.Name+".toml"))
+}
+
+// WriteToken stores a pasted fine-grained PAT beside the deploy keys and
+// returns the relative reference the spec carries. Same trust story as
+// keys: root-owned, 0600, resolved by reconcile against the same dir.
+func WriteToken(p Paths, name, token string) (string, error) {
+	if !deployName.MatchString(name) {
+		return "", fmt.Errorf("bad deployment name")
+	}
+	token = strings.TrimSpace(token)
+	if token == "" || strings.ContainsAny(token, " \n\t") || len(token) < 20 {
+		return "", fmt.Errorf("that doesn't look like a GitHub token (one line, 20+ chars)")
+	}
+	dir := filepath.Join(p.Deployments, ".keys")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(filepath.Join(dir, name+".token"), []byte(token+"\n"), 0o600); err != nil {
+		return "", err
+	}
+	return ".keys/" + name + ".token", nil
 }
 
 // WriteDeployKey stores a pasted read-only deploy key under the

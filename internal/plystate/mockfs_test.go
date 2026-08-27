@@ -250,3 +250,68 @@ func TestEventsJournal(t *testing.T) {
 		t.Errorf("Age broken: %+v", all[0])
 	}
 }
+
+func TestGithubSpecRender(t *testing.T) {
+	gh := GithubSpec{
+		Name:      "dash",
+		Repo:      "iluxav/ply-dashboard",
+		Asset:     "dashboard",
+		TokenFile: ".keys/dash.token",
+		Publish:   "internal:7070",
+		Domain:    "dash.example.com",
+		Env:       "LOG=debug",
+	}
+	text, err := gh.Render()
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	for _, want := range []string{
+		`github = "iluxav/ply-dashboard"`,
+		`asset = "dashboard"`,
+		`token_file = ".keys/dash.token"`,
+		`publish = ["internal:7070"]`,
+		`LOG = "debug"`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "version") {
+		t.Error("blank version must be omitted (follow latest)")
+	}
+	// asset == name is the default; the spec should not repeat it
+	same := GithubSpec{Name: "dashboard", Repo: "a/b", Asset: "dashboard"}
+	text, _ = same.Render()
+	if strings.Contains(text, "asset") {
+		t.Error("asset equal to name should be omitted")
+	}
+	for _, bad := range []GithubSpec{
+		{Name: "x", Repo: "not-org-repo"},
+		{Name: "Bad Name", Repo: "a/b"},
+	} {
+		if _, err := bad.Render(); err == nil {
+			t.Errorf("should reject %+v", bad)
+		}
+	}
+}
+
+func TestWriteToken(t *testing.T) {
+	w := newMockWorld(t.TempDir())
+	if _, err := WriteToken(w.p, "dash", "short"); err == nil {
+		t.Error("junk token should be rejected")
+	}
+	if _, err := WriteToken(w.p, "dash", "has spaces in it which is wrong"); err == nil {
+		t.Error("multiword token should be rejected")
+	}
+	ref, err := WriteToken(w.p, "dash", "github_pat_11ABCDEF0123456789abcdef")
+	if err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if ref != ".keys/dash.token" {
+		t.Errorf("ref = %q", ref)
+	}
+	info, err := os.Stat(filepath.Join(w.p.Deployments, ".keys", "dash.token"))
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Errorf("token file: %v mode %v", err, info.Mode().Perm())
+	}
+}

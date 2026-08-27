@@ -1,11 +1,15 @@
 {{define "deploy_source"}}
 <div id="source-wizard">
-  <form hx-post="/deploy/inspect" hx-target="#source-wizard" hx-swap="outerHTML" class="flex gap-2 text-xs">
+  <form hx-post="/deploy/inspect" hx-target="#source-wizard" hx-swap="outerHTML" class="flex flex-wrap gap-2 text-xs">
     <input name="repo" value="{{with .Source}}{{.RepoURL}}{{end}}"
            placeholder="https://github.com/org/repo — public or private"
-           class="flex-1 bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100">
+           class="flex-1 min-w-64 bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100">
+    <input name="token" type="password" value="{{with .Source}}{{.Token}}{{end}}"
+           placeholder="token (private repos only)" autocomplete="off"
+           class="w-56 bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100">
     <button class="bg-zinc-100 text-zinc-950 rounded px-4 py-1.5 font-bold hover:bg-white">inspect</button>
   </form>
+  <div class="text-zinc-700 text-xs mt-1">private repos: a fine-grained PAT with Contents: read on that one repo — one credential for cloning, images and update checks</div>
 
 {{with .Source}}
   {{with .Error}}<div class="text-red-400 text-xs mt-3 border border-red-900/60 rounded px-3 py-2">{{.}}</div>{{end}}
@@ -16,6 +20,9 @@
       <span class="text-zinc-600">detected:</span>
       {{range .Insp.Markers}}<span class="text-zinc-400 border border-zinc-800 rounded px-1.5 py-0.5 mr-1">{{.}}</span>{{end}}
     {{end}}
+    {{with .Insp.Release}}
+      <span class="text-green-500/80 border border-green-900/60 rounded px-1.5 py-0.5 mr-1">release v{{.Version}} · {{.Asset}} image</span>
+    {{end}}
     {{with .Insp.Note}}<div class="text-amber-400/90 mt-2">{{.}}</div>{{end}}
   </div>
 
@@ -23,8 +30,50 @@
         hx-post="/deploy/preview" hx-trigger="input delay:400ms" hx-target="#spec-preview" hx-swap="innerHTML">
     <input type="hidden" name="inspected" value="1">
     <input type="hidden" name="repo" value="{{.Spec.Repo}}">
-    <input type="hidden" name="ssh_url" value="{{.Insp.SSHURL}}">
+    <input type="hidden" name="gh_repo" value="{{.Gh.Repo}}">
+    <input type="hidden" name="token" value="{{.Token}}">
 
+    <fieldset class="md:col-span-2 flex gap-4 items-baseline">
+      <span class="text-zinc-600">how to deploy:</span>
+      <label class="flex items-center gap-1.5 {{if not .Insp.Release}}text-zinc-600{{else}}text-zinc-300{{end}}">
+        <input type="radio" name="lane" value="release" {{if eq .Lane "release"}}checked{{end}}
+               hx-post="/deploy/inspect" hx-include="closest form" hx-target="#source-wizard" hx-swap="outerHTML">
+        pull CI image from releases{{if .Insp.Release}} <span class="text-green-500/80">(recommended)</span>{{end}}
+      </label>
+      <label class="flex items-center gap-1.5 text-zinc-300">
+        <input type="radio" name="lane" value="source" {{if eq .Lane "source"}}checked{{end}}
+               hx-post="/deploy/inspect" hx-include="closest form" hx-target="#source-wizard" hx-swap="outerHTML">
+        build from source on this host
+      </label>
+    </fieldset>
+
+    {{if eq .Lane "release"}}
+    <label class="grid gap-1">
+      <span class="text-zinc-600">deployment name</span>
+      <input name="name" value="{{.Gh.Name}}" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100">
+    </label>
+    <label class="grid gap-1">
+      <span class="text-zinc-600">image name in the release asset</span>
+      <input name="gh_asset" value="{{.Gh.Asset}}" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100 font-mono">
+    </label>
+    <label class="grid gap-1">
+      <span class="text-zinc-600">version <span class="text-zinc-700">(blank = follow the latest release)</span></span>
+      <input name="gh_version" value="{{.Gh.Version}}" placeholder="follow latest" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100">
+    </label>
+    <label class="grid gap-1">
+      <span class="text-zinc-600">publish (ADDR:PORT)</span>
+      <input name="publish" value="{{.Gh.Publish}}" placeholder="internal:8080" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100">
+    </label>
+    <label class="grid gap-1">
+      <span class="text-zinc-600">domain <span class="text-zinc-700">(optional, via the edge)</span></span>
+      <input name="domain" value="{{.Gh.Domain}}" placeholder="app.example.com" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100">
+    </label>
+    <label class="grid gap-1">
+      <span class="text-zinc-600">env (KEY=VALUE per line)</span>
+      <textarea name="env" rows="2" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100 font-mono">{{.Gh.Env}}</textarea>
+    </label>
+
+    {{else}}
     <label class="grid gap-1">
       <span class="text-zinc-600">deployment name</span>
       <input name="name" value="{{.Spec.Name}}" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100">
@@ -72,16 +121,10 @@
       <span class="text-zinc-600">env (KEY=VALUE per line)</span>
       <textarea name="env" rows="2" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100 font-mono">{{.Spec.Env}}</textarea>
     </label>
-    <label class="grid gap-1 md:col-span-2">
-      <span class="text-zinc-600">deploy key
-        <span class="text-zinc-700">— required for private repos; stored root-only as deployments/.keys/&lt;name&gt;, the spec switches to the ssh URL</span>
-      </span>
-      <textarea name="key" rows="3" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----" spellcheck="false"
-                class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100 font-mono">{{.Key}}</textarea>
-    </label>
+    {{end}}
 
     <div class="md:col-span-2">
-      <span class="text-zinc-600">the file that will be written — deployments/<span class="text-zinc-400">{{.Spec.Name}}.toml</span>:</span>
+      <span class="text-zinc-600">the file that will be written — deployments/<span class="text-zinc-400">{{if eq .Lane "release"}}{{.Gh.Name}}{{else}}{{.Spec.Name}}{{end}}.toml</span>:</span>
       <div id="spec-preview" class="mt-1">
         {{if .Preview}}<pre class="border border-zinc-800 rounded px-3 py-2 text-zinc-400 overflow-x-auto">{{.Preview}}</pre>
         {{else}}<div class="text-zinc-700">fill the form — the preview appears here</div>{{end}}
@@ -91,7 +134,7 @@
     <div class="md:col-span-2">
       <button hx-post="/deploy/source" hx-target="#source-wizard" hx-swap="outerHTML" hx-include="closest form"
               class="bg-zinc-100 text-zinc-950 rounded px-4 py-1.5 font-bold hover:bg-white">create deployment</button>
-      <span class="text-zinc-700 ml-3">systemd notices the file, `ply reconcile` clones and builds on this host</span>
+      <span class="text-zinc-700 ml-3">{{if eq .Lane "release"}}`ply reconcile` downloads the release image and runs it{{else}}systemd notices the file, `ply reconcile` clones and builds on this host{{end}}</span>
     </div>
   </form>
   {{end}}

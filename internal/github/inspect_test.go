@@ -50,7 +50,7 @@ func TestLiveInspectPublicRepo(t *testing.T) {
 	if testing.Short() {
 		t.Skip("network")
 	}
-	insp, err := Inspect("https://github.com/iluxav/next-dummy")
+	insp, err := Inspect("https://github.com/iluxav/next-dummy", "")
 	if err != nil {
 		t.Fatalf("inspect: %v", err)
 	}
@@ -95,12 +95,29 @@ func TestLiveLsRemote(t *testing.T) {
 	if testing.Short() {
 		t.Skip("network")
 	}
-	sha, err := LsRemote("https://github.com/iluxav/next-dummy", "")
+	sha, err := LsRemote("https://github.com/iluxav/next-dummy", "", "")
 	if err != nil || len(sha) != 40 {
 		t.Fatalf("sha %q err %v", sha, err)
 	}
-	byBranch, err := LsRemote("https://github.com/iluxav/next-dummy", "main")
+	byBranch, err := LsRemote("https://github.com/iluxav/next-dummy", "main", "")
 	if err != nil || byBranch != sha {
 		t.Errorf("main %q vs HEAD %q (err %v)", byBranch, sha, err)
+	}
+}
+
+// / Network test: the dashboard repo's latest release carries a ply image.
+func TestLiveImageRelease(t *testing.T) {
+	if testing.Short() {
+		t.Skip("network")
+	}
+	rel := latestImageRelease("iluxav/ply-dashboard", "")
+	if rel == nil {
+		t.Fatal("ply-dashboard releases should carry images")
+	}
+	if rel.Asset != "dashboard" {
+		t.Errorf("asset app = %q, want dashboard", rel.Asset)
+	}
+	if rel.Version == "" {
+		t.Error("version empty")
 	}
 }

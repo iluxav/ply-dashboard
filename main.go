@@ -49,9 +49,10 @@ type server struct {
 // --- freshness: is a newer commit/release available? -------------------------
 
 // One background sweep every 2 minutes; the 3s-polling partials only read
-// the cache. Checks are tokenless and rate-limit-free: smart-HTTP refs
-// advertisement for repo lanes, the releases/latest redirect for github
-// lanes. Private sources are honestly unknowable from here and get no row.
+// the cache. Public checks are tokenless and rate-limit-free: smart-HTTP
+// refs advertisement for repo lanes, the releases/latest redirect for
+// github lanes. Private repos join when the spec carries a token_file;
+// ssh-remote repos stay honestly unknowable and get no row.
 type freshness struct {
 	paths  plystate.Paths
 	mu     sync.Mutex
@@ -81,14 +82,14 @@ func (f *freshness) sweep() {
 		var fr *Freshness
 		switch {
 		case d.Field("github") != "":
-			latest, err := github.LatestRelease(d.Field("github"))
+			latest, err := github.LatestRelease(d.Field("github"), f.secret(d))
 			if err != nil {
 				continue
 			}
 			cur := d.DeployedVersion()
 			fr = &Freshness{Current: cur, Latest: latest, UpdateAvailable: cur != "" && cur != latest}
 		case strings.HasPrefix(d.Field("repo"), "http"):
-			sha, err := github.LsRemote(d.Field("repo"), d.Field("ref"))
+			sha, err := github.LsRemote(d.Field("repo"), d.Field("ref"), f.secret(d))
 			if err != nil {
 				continue
 			}
@@ -113,6 +114,25 @@ func (f *freshness) sweep() {
 		}
 	}
 	f.mu.Unlock()
+}
+
+// secret reads a spec's stored PAT so private repos get freshness lines
+// too — the token lives inside the deployments grant, so this is the one
+// credential the dashboard can legitimately reach.
+func (f *freshness) secret(d plystate.Deployment) string {
+	ref := d.Field("token_file")
+	if ref == "" {
+		return ""
+	}
+	path := ref
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(f.paths.Deployments, ref)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(raw))
 }
 
 func (f *freshness) Of(name string) *Freshness {
@@ -252,8 +272,10 @@ type sourceForm struct {
 	Inspected  bool
 	Frameworks []string
 	Framework  string
+	Lane       string // "release" (CI image from GitHub releases) | "source" (build here)
+	Token      string
 	Spec       plystate.SourceSpec
-	Key        string
+	Gh         plystate.GithubSpec
 	Preview    string
 	Error      string
 }
@@ -496,17 +518,18 @@ func (s *server) renderSource(w http.ResponseWriter, form *sourceForm) {
 	s.render(w, "deploy_source", "deploy_source", pageData{Source: form})
 }
 
-// sourceInspect answers both the inspect button and a preset switch (the
-// latter arrives with inspected=1 and keeps everything but preset fields).
+// sourceInspect answers the inspect button, a lane switch, and a preset
+// switch (the latter two arrive with inspected=1 and keep typed fields).
 func (s *server) sourceInspect(w http.ResponseWriter, r *http.Request) {
 	repoURL := strings.TrimSpace(r.FormValue("repo"))
-	form := &sourceForm{RepoURL: repoURL}
+	token := strings.TrimSpace(r.FormValue("token"))
+	form := &sourceForm{RepoURL: repoURL, Token: token}
 	if repoURL == "" {
 		form.Error = "paste a repo URL first"
 		s.renderSource(w, form)
 		return
 	}
-	insp, err := github.Inspect(repoURL)
+	insp, err := github.Inspect(repoURL, token)
 	if err != nil {
 		form.Error = err.Error()
 		s.renderSource(w, form)
@@ -514,17 +537,29 @@ func (s *server) sourceInspect(w http.ResponseWriter, r *http.Request) {
 	}
 	form.Insp = insp
 	form.Inspected = true
+
+	// the lane is a pre-answered question: releases with a ply image beat
+	// building on the droplet — but the radio lets you disagree
+	form.Lane = "source"
+	if insp.Release != nil {
+		form.Lane = "release"
+	}
+	if lane := r.FormValue("lane"); lane == "release" || lane == "source" {
+		form.Lane = lane
+	}
 	form.Framework = insp.Framework
 	if fw := r.FormValue("framework"); fw != "" {
 		form.Framework = fw
 	}
 
-	spec := plystate.SourceSpec{}
+	spec, gh := plystate.SourceSpec{}, plystate.GithubSpec{}
 	if r.FormValue("inspected") == "1" {
-		spec = specFromForm(r) // preset switch: keep what the user typed
+		spec, gh = specFromForm(r), githubFromForm(r)
 	} else {
-		spec.Name = nameFromRepo(insp.CloneURL)
+		name := nameFromRepo(insp.CloneURL)
+		spec.Name, gh.Name = name, name
 		spec.Ref = insp.DefaultBranch
+		spec.Publish, gh.Publish = r.FormValue("publish"), r.FormValue("publish")
 	}
 	preset := github.PresetFor(form.Framework)
 	spec.Build, spec.Runtime = preset.Build, preset.Runtime
@@ -533,16 +568,20 @@ func (s *server) sourceInspect(w http.ResponseWriter, r *http.Request) {
 		spec.Publish = "internal:" + preset.Port
 	}
 	spec.Repo = insp.CloneURL
-	form.Spec = spec
-	form.Key = r.FormValue("key")
-	form.Preview = previewOf(spec, form.Key, insp.SSHURL)
+	gh.Repo = insp.Repo
+	if insp.Release != nil && gh.Asset == "" {
+		gh.Asset = insp.Release.Asset
+	}
+	if gh.Name == "" {
+		gh.Name = nameFromRepo(insp.CloneURL)
+	}
+	form.Spec, form.Gh = spec, gh
+	form.Preview = previewFor(form)
 	s.renderSource(w, form)
 }
 
 func (s *server) sourcePreview(w http.ResponseWriter, r *http.Request) {
-	spec := specFromForm(r)
-	applyKey(&spec, strings.TrimSpace(r.FormValue("key")), r.FormValue("ssh_url"))
-	text, err := spec.Render()
+	text, err := renderFromForm(r)
 	if err != nil {
 		fmt.Fprintf(w, `<div class="text-amber-400/90">%s</div>`, template.HTMLEscapeString(err.Error()))
 		return
@@ -551,56 +590,92 @@ func (s *server) sourcePreview(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) sourceCreate(w http.ResponseWriter, r *http.Request) {
-	spec := specFromForm(r)
-	key := strings.TrimSpace(r.FormValue("key"))
-	sshURL := r.FormValue("ssh_url")
+	lane := r.FormValue("lane")
+	token := strings.TrimSpace(r.FormValue("token"))
 	form := &sourceForm{
 		RepoURL:   r.FormValue("repo"),
-		Insp:      github.Inspection{SSHURL: sshURL},
 		Inspected: true,
+		Lane:      lane,
+		Token:     token,
 		Framework: r.FormValue("framework"),
-		Spec:      spec,
-		Key:       key,
+		Spec:      specFromForm(r),
+		Gh:        githubFromForm(r),
 	}
 	fail := func(err error) {
 		form.Error = err.Error()
-		form.Preview = previewOf(spec, key, sshURL)
+		form.Preview = previewFor(form)
 		s.renderSource(w, form)
 	}
-	applyKey(&spec, key, sshURL)
-	if _, err := spec.Render(); err != nil { // validate before touching disk
+	if _, err := renderFromForm(r); err != nil { // validate before touching disk
 		fail(err)
 		return
 	}
-	if key != "" {
-		ref, err := plystate.WriteDeployKey(s.paths, spec.Name, key)
-		if err != nil {
+	if lane == "release" {
+		gh := form.Gh
+		if token != "" {
+			ref, err := plystate.WriteToken(s.paths, gh.Name, token)
+			if err != nil {
+				fail(err)
+				return
+			}
+			gh.TokenFile = ref
+		}
+		if err := plystate.WriteGithubDeployment(s.paths, gh); err != nil {
 			fail(err)
 			return
 		}
-		spec.DeployKey = ref
-	}
-	if err := plystate.WriteSourceDeployment(s.paths, spec); err != nil {
-		fail(err)
-		return
+	} else {
+		spec := form.Spec
+		if token != "" {
+			ref, err := plystate.WriteToken(s.paths, spec.Name, token)
+			if err != nil {
+				fail(err)
+				return
+			}
+			spec.TokenFile = ref
+		}
+		if err := plystate.WriteSourceDeployment(s.paths, spec); err != nil {
+			fail(err)
+			return
+		}
 	}
 	w.Header().Set("HX-Redirect", "/deploy")
 }
 
-// applyKey mirrors create-time behavior into previews: a pasted key means
-// the ssh URL and a .keys reference land in the spec.
-func applyKey(spec *plystate.SourceSpec, key, sshURL string) {
-	if key == "" {
-		return
+// renderFromForm builds the lane's spec exactly as create would (token
+// reference included) — the preview and the written file cannot diverge.
+func renderFromForm(r *http.Request) (string, error) {
+	token := strings.TrimSpace(r.FormValue("token"))
+	if r.FormValue("lane") == "release" {
+		gh := githubFromForm(r)
+		if token != "" {
+			gh.TokenFile = ".keys/" + gh.Name + ".token"
+		}
+		return gh.Render()
 	}
-	spec.DeployKey = ".keys/" + spec.Name
-	if sshURL != "" {
-		spec.Repo = sshURL
+	spec := specFromForm(r)
+	if token != "" {
+		spec.TokenFile = ".keys/" + spec.Name + ".token"
 	}
+	return spec.Render()
 }
 
-func previewOf(spec plystate.SourceSpec, key, sshURL string) string {
-	applyKey(&spec, key, sshURL)
+func previewFor(form *sourceForm) string {
+	if form.Lane == "release" {
+		gh := form.Gh
+		if form.Token != "" {
+			gh.TokenFile = ".keys/" + gh.Name + ".token"
+		}
+		text, err := gh.Render()
+		if err != nil {
+			return ""
+		}
+		return text
+	}
+	spec := form.Spec
+	if form.Token != "" {
+		spec.TokenFile = ".keys/" + spec.Name + ".token"
+	}
 	text, err := spec.Render()
 	if err != nil {
 		return ""
@@ -621,6 +696,18 @@ func specFromForm(r *http.Request) plystate.SourceSpec {
 		Publish:    strings.TrimSpace(r.FormValue("publish")),
 		Domain:     strings.TrimSpace(r.FormValue("domain")),
 		Env:        r.FormValue("env"),
+	}
+}
+
+func githubFromForm(r *http.Request) plystate.GithubSpec {
+	return plystate.GithubSpec{
+		Name:    strings.TrimSpace(r.FormValue("name")),
+		Repo:    strings.TrimSpace(r.FormValue("gh_repo")),
+		Asset:   strings.TrimSpace(r.FormValue("gh_asset")),
+		Version: strings.TrimSpace(r.FormValue("gh_version")),
+		Publish: strings.TrimSpace(r.FormValue("publish")),
+		Domain:  strings.TrimSpace(r.FormValue("domain")),
+		Env:     r.FormValue("env"),
 	}
 }
 

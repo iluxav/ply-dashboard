@@ -5,10 +5,12 @@
 package github
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -20,12 +22,20 @@ type Inspection struct {
 	Repo          string // "org/repo"; empty when the URL isn't GitHub
 	CloneURL      string // what the spec's repo field should carry
 	SSHURL        string // the deploy-key form of the same repo
-	Found         bool   // the public API confirmed it exists
+	Found         bool   // the API confirmed it exists
 	Private       bool   // API says private, or 404 (private and invisible look identical)
 	DefaultBranch string
 	Markers       []string // what the probe saw, for the "detected" line
 	Framework     string   // ply | nextjs | node | go | rust | unknown
 	Note          string   // one human sentence about what that means
+	Release       *Release // latest release carrying a .img for this arch, if any
+}
+
+// Release: the CI-image lane's offer — the latest release ships a ply
+// image for this host's arch, so pulling beats building.
+type Release struct {
+	Version string
+	Asset   string // app name parsed from <app>-<ver>-linux-<arch>.img
 }
 
 var repoPattern = regexp.MustCompile(
@@ -45,7 +55,10 @@ func ParseRepo(raw string) string {
 	return ""
 }
 
-func Inspect(rawURL string) (Inspection, error) {
+// Inspect learns what a repo is. token (a fine-grained PAT, optional)
+// unlocks private repos: with it, private gets the same full inspection
+// as public — meta, file probes, releases.
+func Inspect(rawURL, token string) (Inspection, error) {
 	rawURL = strings.TrimSpace(rawURL)
 	repo := ParseRepo(rawURL)
 	if repo == "" {
@@ -61,14 +74,18 @@ func Inspect(rawURL string) (Inspection, error) {
 		SSHURL:   "git@github.com:" + repo + ".git",
 	}
 
-	status, body, err := get("https://api.github.com/repos/" + repo)
+	status, body, err := getAuth("https://api.github.com/repos/"+repo, token)
 	switch {
 	case err != nil:
 		return insp, err
 	case status == http.StatusNotFound:
 		insp.Private = true
 		insp.Framework = "unknown"
-		insp.Note = "GitHub says 404 — a private repo looks exactly like a missing one; if it's yours, paste a read-only deploy key below and pick a preset"
+		if token == "" {
+			insp.Note = "GitHub says 404 — a private repo looks exactly like a missing one; if it's yours, paste a fine-grained token (Contents: read) to inspect and deploy it"
+		} else {
+			insp.Note = "still 404 with that token — wrong repo, or the token lacks access to it"
+		}
 		return insp, nil
 	case status != http.StatusOK:
 		return insp, fmt.Errorf("GitHub API answered %d for %s", status, repo)
@@ -83,21 +100,27 @@ func Inspect(rawURL string) (Inspection, error) {
 	insp.Found = true
 	insp.Private = meta.Private
 	insp.DefaultBranch = meta.DefaultBranch
-	if insp.Private {
+	if insp.Private && token == "" {
 		insp.Framework = "unknown"
-		insp.Note = "private repo — contents not inspectable without credentials; paste a read-only deploy key and pick a preset"
+		insp.Note = "private repo — paste a fine-grained token (Contents: read) to inspect and deploy it"
 		return insp, nil
 	}
 
-	insp.probe()
+	insp.probe(token)
+	insp.Release = latestImageRelease(repo, token)
 	return insp, nil
 }
 
-// probe sniffs well-known files off raw.githubusercontent.com and decides
-// the framework. Detection is a suggestion the form lets you override.
-func (i *Inspection) probe() {
+// probe sniffs well-known files and decides the framework. Public repos
+// read raw.githubusercontent.com; a token switches to the API's raw view
+// so private repos probe identically.
+func (i *Inspection) probe(token string) {
 	raw := func(path string) (int, []byte) {
-		status, body, err := get(fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s", i.Repo, i.DefaultBranch, path))
+		url := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s", i.Repo, i.DefaultBranch, path)
+		if token != "" {
+			url = fmt.Sprintf("https://api.github.com/repos/%s/contents/%s?ref=%s", i.Repo, path, i.DefaultBranch)
+		}
+		status, body, err := getRaw(url, token)
 		if err != nil {
 			return 0, nil
 		}
@@ -209,10 +232,27 @@ var noRedirect = &http.Client{
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 }
 
-// LatestRelease resolves the newest release version the way ply does: the
+// LatestRelease resolves the newest release version. Tokenless, the
 // `releases/latest/download/…` redirect names the tag in its Location —
-// one HEAD request, no API, no rate limit.
-func LatestRelease(repo string) (string, error) {
+// one HEAD request, no API, no rate limit. With a token (private repos),
+// the API answers instead.
+func LatestRelease(repo, token string) (string, error) {
+	if token != "" {
+		status, body, err := getAuth("https://api.github.com/repos/"+repo+"/releases/latest", token)
+		if err != nil {
+			return "", err
+		}
+		if status != http.StatusOK {
+			return "", fmt.Errorf("%s: releases API answered %d", repo, status)
+		}
+		var rel struct {
+			TagName string `json:"tag_name"`
+		}
+		if err := json.Unmarshal(body, &rel); err != nil || rel.TagName == "" {
+			return "", fmt.Errorf("%s: no tag in release", repo)
+		}
+		return strings.TrimPrefix(rel.TagName, "v"), nil
+	}
 	url := "https://github.com/" + repo + "/releases/latest/download/probe"
 	req, err := http.NewRequest(http.MethodHead, url, nil)
 	if err != nil {
@@ -229,6 +269,40 @@ func LatestRelease(repo string) (string, error) {
 		return "", fmt.Errorf("%s: no releases (or private)", repo)
 	}
 	return VersionFromLocation(loc)
+}
+
+// latestImageRelease asks the API whether the newest release carries a ply
+// image for this host's arch — the signal that the CI lane is available.
+// Best-effort: nil on any miss (no releases, rate limit, wrong arch).
+func latestImageRelease(repo, token string) *Release {
+	status, body, err := getAuth("https://api.github.com/repos/"+repo+"/releases/latest", token)
+	if err != nil || status != http.StatusOK {
+		return nil
+	}
+	var rel struct {
+		TagName string `json:"tag_name"`
+		Assets  []struct {
+			Name string `json:"name"`
+		} `json:"assets"`
+	}
+	if json.Unmarshal(body, &rel) != nil || rel.TagName == "" {
+		return nil
+	}
+	version := strings.TrimPrefix(rel.TagName, "v")
+	suffix := fmt.Sprintf("-%s-linux-%s.img", version, hostArch())
+	for _, a := range rel.Assets {
+		if app, found := strings.CutSuffix(a.Name, suffix); found && app != "" {
+			return &Release{Version: version, Asset: app}
+		}
+	}
+	return nil
+}
+
+func hostArch() string {
+	if runtime.GOARCH == "arm64" {
+		return "arm64"
+	}
+	return "x64"
 }
 
 // VersionFromLocation: `…/releases/download/v0.1.3/probe` → `0.1.3`.
@@ -248,10 +322,11 @@ func VersionFromLocation(loc string) (string, error) {
 
 // LsRemote reads the tip commit of a branch (or the default HEAD) over
 // git's smart-HTTP advertisement — what `git ls-remote` does, minus git.
-// Works for any public https remote, GitHub or not.
-func LsRemote(cloneURL, ref string) (string, error) {
+// Works for any public https remote, GitHub or not; a token (basic auth,
+// the PAT-as-password form git itself uses) unlocks private ones.
+func LsRemote(cloneURL, ref, token string) (string, error) {
 	base := strings.TrimSuffix(strings.TrimSuffix(strings.TrimSpace(cloneURL), "/"), ".git")
-	status, body, err := get(base + ".git/info/refs?service=git-upload-pack")
+	status, body, err := getBasic(base+".git/info/refs?service=git-upload-pack", token)
 	if err != nil {
 		return "", err
 	}
@@ -305,12 +380,48 @@ func parseAdvertisement(b []byte) map[string]string {
 	return out
 }
 
-func get(url string) (int, []byte, error) {
+func get(url string) (int, []byte, error) { return request(url, nil) }
+
+// getAuth: Bearer-authenticated API request (no-op without a token).
+func getAuth(url, token string) (int, []byte, error) {
+	h := map[string]string{}
+	if token != "" {
+		h["Authorization"] = "Bearer " + token
+	}
+	return request(url, h)
+}
+
+// getRaw: file content — raw.githubusercontent tokenless, the contents
+// API's raw view with a token.
+func getRaw(url, token string) (int, []byte, error) {
+	h := map[string]string{}
+	if token != "" {
+		h["Authorization"] = "Bearer " + token
+		h["Accept"] = "application/vnd.github.raw+json"
+	}
+	return request(url, h)
+}
+
+// getBasic: git smart-HTTP auth — basic with the PAT as password, exactly
+// what `git clone https://…` sends.
+func getBasic(url, token string) (int, []byte, error) {
+	h := map[string]string{}
+	if token != "" {
+		h["Authorization"] = "Basic " +
+			base64.StdEncoding.EncodeToString([]byte("x-access-token:"+token))
+	}
+	return request(url, h)
+}
+
+func request(url string, headers map[string]string) (int, []byte, error) {
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return 0, nil, err
 	}
 	req.Header.Set("User-Agent", "ply-dashboard")
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return 0, nil, err
