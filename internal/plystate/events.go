@@ -80,3 +80,23 @@ func (e Event) LogTarget() string {
 	}
 	return e.App
 }
+
+// RollbackTarget extracts what a past deploy event can be pinned back to:
+// the commit for repo-lane builds, the image version otherwise.
+// (kind, value); empty kind = not a rollback candidate.
+func (e Event) RollbackTarget() (string, string) {
+	if e.Event != "deploy" {
+		return "", ""
+	}
+	if m := deployedCommit.FindStringSubmatch(e.Detail); m != nil {
+		return "ref", m[1]
+	}
+	if m := deployedVersion.FindStringSubmatch(e.Detail); m != nil {
+		return "version", m[1]
+	}
+	return "", ""
+}
+
+// Template-friendly halves of RollbackTarget (templates want one value).
+func (e Event) RollbackKey() string   { k, _ := e.RollbackTarget(); return k }
+func (e Event) RollbackValue() string { _, v := e.RollbackTarget(); return v }

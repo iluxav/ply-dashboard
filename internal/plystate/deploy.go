@@ -158,12 +158,15 @@ func renderEnv(b *strings.Builder, envLines string) {
 
 // WriteDeployment renders and atomically lands a spec file.
 // env is KEY=VALUE lines; blank values are dropped (unfilled form rows).
-func WriteDeployment(p Paths, name, app, version, publish, domain, envLines string) error {
+func WriteDeployment(p Paths, name, app, version, publish, domain, envLines string, grantLinks bool) error {
 	if !deployName.MatchString(name) {
 		return fmt.Errorf("deployment name must be [a-z0-9-], got %q", name)
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "app = %q\n", app)
+	if grantLinks {
+		b.WriteString("grant_links = true\n")
+	}
 	if version != "" {
 		fmt.Fprintf(&b, "version = %q\n", version)
 	}
@@ -469,4 +472,55 @@ func WriteDeployKey(p Paths, name, key string) (string, error) {
 		return "", err
 	}
 	return ".keys/" + name, nil
+}
+
+// PinDeployment upserts one `key = "value"` line in a spec — the rollback
+// mechanism: pin a version or ref, and the write itself is the touch that
+// makes reconcile converge (and roll) to it. Removing the pin by editing
+// the spec resumes follow-latest.
+func PinDeployment(p Paths, name, key, value string) error {
+	if key != "version" && key != "ref" {
+		return fmt.Errorf("can only pin version or ref")
+	}
+	if !regexp.MustCompile(`^[A-Za-z0-9._-]+$`).MatchString(value) {
+		return fmt.Errorf("bad pin value %q", value)
+	}
+	d, ok := OneDeployment(p, name)
+	if !ok {
+		return fmt.Errorf("deployment %q does not exist", name)
+	}
+	line := fmt.Sprintf("%s = %q", key, value)
+	pattern := regexp.MustCompile(`(?m)^\s*` + key + `\s*=.*$`)
+	var spec string
+	if pattern.MatchString(d.Spec) {
+		spec = pattern.ReplaceAllString(d.Spec, line)
+	} else {
+		// after the source line, so the file reads top-down sensibly
+		src := regexp.MustCompile(`(?m)^\s*(app|image|github|repo)\s*=.*$`)
+		loc := src.FindStringIndex(d.Spec)
+		if loc == nil {
+			return fmt.Errorf("spec has no source line")
+		}
+		spec = d.Spec[:loc[1]] + "\n" + line + d.Spec[loc[1]:]
+	}
+	return RewriteDeployment(p, name, spec)
+}
+
+// History: this deployment's past deploys, newest first, deduplicated by
+// rollback target — the menu the rollback buttons render from.
+func History(p Paths, name string, limit int) []Event {
+	var out []Event
+	seen := map[string]bool{}
+	for _, e := range Events(p, name, 200) {
+		kind, value := e.RollbackTarget()
+		if kind == "" || seen[kind+value] {
+			continue
+		}
+		seen[kind+value] = true
+		out = append(out, e)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
 }

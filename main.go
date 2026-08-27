@@ -250,6 +250,7 @@ func main() {
 	mux.HandleFunc("GET /ws/term/{name}/{n}", s.guard(s.termWS))
 	mux.HandleFunc("POST /deploy/{name}/now", s.guard(s.deployNow))
 	mux.HandleFunc("POST /deploy/{name}/edit", s.guard(s.deployEdit))
+	mux.HandleFunc("POST /deploy/{name}/rollback", s.guard(s.deployRollback))
 	mux.HandleFunc("POST /deploy/inspect", s.guard(s.sourceInspect))
 	mux.HandleFunc("POST /deploy/preview", s.guard(s.sourcePreview))
 	mux.HandleFunc("POST /deploy/source", s.guard(s.sourceCreate))
@@ -269,6 +270,7 @@ func (s *server) parseTemplates() {
 		"contract":       registry.Contract,
 		"defaultPublish": registry.DefaultPublish,
 		"freshOf":        s.fresh.Of,
+		"historyOf":      s.historyOf,
 	}
 	page := func(files ...string) *template.Template {
 		paths := append([]string{"web/templates/base.html"}, files...)
@@ -606,6 +608,7 @@ func (s *server) deployCreate(w http.ResponseWriter, r *http.Request) {
 		strings.TrimSpace(r.FormValue("publish")),
 		strings.TrimSpace(r.FormValue("domain")),
 		r.FormValue("env"),
+		r.FormValue("grant_links") == "1",
 	)
 	if err != nil {
 		http.Redirect(w, r, "/deploy?err="+template.URLQueryEscaper(err.Error()), http.StatusSeeOther)
@@ -625,6 +628,20 @@ func (s *server) deployNow(w http.ResponseWriter, r *http.Request) {
 		back = "/deploy"
 	}
 	http.Redirect(w, r, back, http.StatusSeeOther)
+}
+
+// deployRollback pins a past version/commit into the spec — the write is
+// the touch, reconcile rolls the app back health-gated. Editing the pin
+// out of the spec resumes follow-latest.
+func (s *server) deployRollback(w http.ResponseWriter, r *http.Request) {
+	key := r.FormValue("key")
+	value := r.FormValue("value")
+	if err := plystate.PinDeployment(s.paths, r.PathValue("name"), key, value); err != nil {
+		http.Redirect(w, r, "/deploy?err="+template.URLQueryEscaper(err.Error()), http.StatusSeeOther)
+		return
+	}
+	s.fresh.Kick()
+	http.Redirect(w, r, "/deploy", http.StatusSeeOther)
 }
 
 // deployEdit saves the spec exactly as typed — the file is the truth, and
@@ -651,6 +668,11 @@ func (s *server) deploymentsPartial(w http.ResponseWriter, _ *http.Request) {
 	s.render(w, "deployments", "deployments", pageData{
 		Deployments: plystate.Deployments(s.paths),
 	})
+}
+
+// historyOf: template helper for the rollback menu.
+func (s *server) historyOf(name string) []plystate.Event {
+	return plystate.History(s.paths, name, 5)
 }
 
 // --- the from-source wizard --------------------------------------------------

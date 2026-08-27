@@ -88,6 +88,9 @@ func Contract(app string) string {
 		return "POSTGRES_PASSWORD=\nPOSTGRES_DB=\nPGPORT=5432"
 	case "redis":
 		return "REDIS_PASSWORD=\nREDIS_PORT=6379"
+	case "notify":
+		// needs grant_links = true in the spec (it reads the events journal)
+		return "WEBHOOK_URL=\nNOTIFY_EVENTS=deploy,deploy-failed,instance-restart"
 	default:
 		return ""
 	}

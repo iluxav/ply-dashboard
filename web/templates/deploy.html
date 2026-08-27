@@ -45,6 +45,10 @@
         <span class="text-fade/50">env (KEY=VALUE per line; blank values are dropped)</span>
         <textarea name="env" rows="3" class="bg-card border border-edge rounded px-2 py-1.5 text-ink font-mono">{{contract .Name}}</textarea>
       </label>
+      <label class="flex items-center gap-1.5 text-fade/50 md:col-span-2">
+        <input type="checkbox" name="grant_links" value="1">
+        grant the links the image requests (dashboard-style apps: notify needs it to read the events journal)
+      </label>
       <div class="md:col-span-2">
         <button class="bg-accent text-ground rounded px-4 py-1.5 font-bold hover:bg-accent-bright">deploy</button>
         <span class="text-fade/35 ml-3">writes /var/lib/ply/deployments/&lt;name&gt;.toml — systemd notices, `ply reconcile` runs it</span>

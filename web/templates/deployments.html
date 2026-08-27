@@ -32,6 +32,20 @@
         <button class="text-fade/50 hover:text-red-400 text-xs">delete</button>
       </form>
     </div>
+    {{$name := .Name}}{{$hist := historyOf .Name}}
+    {{if gt (len $hist) 1}}
+    <div class="text-xs mt-1 flex items-baseline gap-2 flex-wrap">
+      <span class="text-fade/35">roll back:</span>
+      {{range $hist}}{{$k := .RollbackKey}}{{$v := .RollbackValue}}
+      <form method="post" action="/deploy/{{$name}}/rollback" class="inline">
+        <input type="hidden" name="key" value="{{$k}}">
+        <input type="hidden" name="value" value="{{$v}}">
+        <button class="text-fade/60 hover:text-accent border border-edge rounded px-1.5"
+                title="pin {{$k}} = {{$v}} — edit the spec to resume follow-latest">{{$v}}</button>
+      </form>
+      {{end}}
+    </div>
+    {{end}}
     <details id="edit-{{.Name}}" hx-preserve="true" class="mt-1">
       <summary class="text-fade/50 text-xs cursor-pointer hover:text-fade">spec — view / edit</summary>
       <form method="post" action="/deploy/{{.Name}}/edit" class="mt-1">
