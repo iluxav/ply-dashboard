@@ -52,6 +52,15 @@
         <span class="text-fade/50">env (KEY=VALUE per line; blank values are dropped)</span>
         <textarea name="env" rows="3" class="bg-card border border-edge rounded px-2 py-1.5 text-ink font-mono">{{.Contract}}</textarea>
       </label>
+      {{if $.EnvFiles}}
+      <label class="grid gap-1 md:col-span-2">
+        <span class="text-fade/50">shared env file (optional — managed below, values never enter the spec)</span>
+        <select name="env_file" class="bg-card border border-edge rounded px-2 py-1.5 text-ink">
+          <option value="">none</option>
+          {{range $.EnvFiles}}{{if not .Missing}}<option>{{.Ref}}</option>{{end}}{{end}}
+        </select>
+      </label>
+      {{end}}
       <label class="flex items-center gap-1.5 text-fade/50 md:col-span-2">
         <input type="checkbox" name="grant_links" value="1" {{if .GrantLinks}}checked{{end}}>
         grant the links the image requests (dashboard-style apps: notify needs it to read the events journal)
@@ -70,6 +79,44 @@
 <h2 class="text-accent/80 text-[10px] uppercase tracking-wider mt-10 mb-3">new deployment · from source</h2>
 <div class="text-fade/50 text-xs mb-3">paste a repo — the droplet clones and builds it, no CI needed; public repos are inspected for a preset</div>
 {{template "deploy_source" .}}
+
+<h2 class="text-accent/80 text-[10px] uppercase tracking-wider mt-10 mb-3">shared env files</h2>
+<div class="text-fade/50 text-xs mb-3">secrets live here on the host (<span class="text-fade">deployments/.env/</span>, 0600) — specs and the fleet repo carry only the reference</div>
+<div class="space-y-2">
+{{range .EnvFiles}}
+  <div class="border border-edge rounded px-3 py-2 flex items-center gap-3 text-xs">
+    <span class="text-ink">{{.Ref}}</span>
+    {{if .Missing}}<span class="text-red-400">missing — referenced but never created</span>{{end}}
+    {{if .Refs}}
+      <span class="text-fade/50">used by {{range $i, $r := .Refs}}{{if $i}}, {{end}}<a href="/app/{{$r}}" class="hover:text-ink">{{$r}}</a>{{end}}</span>
+    {{else}}
+      <span class="text-fade/35">unreferenced</span>
+    {{end}}
+    <button hx-get="/partials/envpane/{{.Name}}" hx-target="#drawer" hx-swap="innerHTML"
+            class="text-accent hover:text-accent-bright border border-deep rounded px-2 py-0.5 ml-auto">edit</button>
+    {{if not .Refs}}
+    <form method="post" action="/env/delete" onsubmit="return confirm('Delete .env/{{.Name}}.env? The values are gone for good.')">
+      <input type="hidden" name="name" value="{{.Name}}">
+      <button class="text-fade/50 hover:text-red-400">delete</button>
+    </form>
+    {{end}}
+  </div>
+{{else}}
+  <div class="text-fade/50 text-xs">none yet</div>
+{{end}}
+{{range .EnvExternal}}
+  <div class="border border-edge/60 rounded px-3 py-2 flex items-center gap-3 text-xs">
+    <span class="text-fade">{{.Path}}</span>
+    <span class="text-fade/50">used by {{.App}}</span>
+    <span class="text-fade/35 ml-auto">outside the dashboard's grant — move it into .env/ to manage it here</span>
+  </div>
+{{end}}
+  <form hx-post="/env/create" hx-target="#drawer" hx-swap="innerHTML" class="flex items-center gap-2 text-xs">
+    <input name="name" placeholder="plybox" required pattern="[a-z0-9][a-z0-9-]*(\.env)?"
+           class="bg-card border border-edge rounded px-2 py-1.5 text-ink w-48">
+    <button class="text-ink/80 hover:text-white border border-edge rounded px-3 py-1.5">new env file</button>
+  </form>
+</div>
 
 <h2 class="text-accent/80 text-[10px] uppercase tracking-wider mt-10 mb-3">deployments on this host</h2>
 <div hx-get="/partials/deployments" hx-trigger="every 3s" hx-swap="innerHTML">

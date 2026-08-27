@@ -242,14 +242,20 @@ func renderEnv(b *strings.Builder, envLines string) {
 
 // WriteDeployment renders and atomically lands a spec file.
 // env is KEY=VALUE lines; blank values are dropped (unfilled form rows).
-func WriteDeployment(p Paths, name, app, version, publish, domain, envLines string, grantLinks bool) error {
+func WriteDeployment(p Paths, name, app, version, publish, domain, envLines, envFile string, grantLinks bool) error {
 	if !deployName.MatchString(name) {
 		return fmt.Errorf("deployment name must be [a-z0-9-], got %q", name)
+	}
+	if envFile != "" && !envRef.MatchString(envFile) {
+		return fmt.Errorf("env file reference must look like .env/<name>.env")
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "app = %q\n", app)
 	if grantLinks {
 		b.WriteString("grant_links = true\n")
+	}
+	if envFile != "" {
+		fmt.Fprintf(&b, "env_file = %q\n", envFile)
 	}
 	if version != "" {
 		fmt.Fprintf(&b, "version = %q\n", version)

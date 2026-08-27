@@ -175,17 +175,22 @@ domain = ["dash.plybox.sh"]
 `,
 		"worker": `repo = "git@github.com:acme/worker.git"
 deploy_key = "/etc/ply/keys/worker"
+env_file = "/root/worker.env"
 build = "cargo build --release"
 runtime = "debian@13"
 entrypoint = "target/release/worker"
 `,
 		"blog": `app = "ghost"
 publish = ["internal:2368"]
+env_file = ".env/plybox.env"
 `,
 	}
 	for name, spec := range specs {
 		writeFile(filepath.Join(w.p.Deployments, name+".toml"), spec)
 	}
+	// a managed env file (referenced by blog) and an external reference,
+	// so the env panel shows both rows
+	writeFile(filepath.Join(w.p.Deployments, ".env", "plybox.env"), "# shared site secrets\nPOSTGRES_PASSWORD=mock-not-real\nGITHUB_CLIENT_SECRET=mock-not-real\n")
 	now := time.Now().Unix()
 	w.writeStatus("redis", DeployStatus{OK: true, Detail: "unchanged (redis-8.0.2-linux-x64.img @ 8.0.2)", TS: now - 3600})
 	w.writeStatus("nextapp", DeployStatus{OK: true, Detail: "deployed nextapp-0.1.0-linux-x64.img @ 6bb7edf", TS: now - 320})
@@ -473,7 +478,10 @@ func logLine(app string) string {
 
 func stamp() string { return time.Now().Format("15:04:05") }
 
-func writeFile(path, content string) { _ = os.WriteFile(path, []byte(content), 0o644) }
+func writeFile(path, content string) {
+	_ = os.MkdirAll(filepath.Dir(path), 0o755)
+	_ = os.WriteFile(path, []byte(content), 0o644)
+}
 
 func appendFile(path, line string) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)

@@ -81,7 +81,7 @@ func TestMockPuppeteerAnswersControl(t *testing.T) {
 
 func TestMockReconcilerAnswersNewDeployment(t *testing.T) {
 	w := newMockWorld(t.TempDir())
-	if err := WriteDeployment(w.p, "shop", "shop", "", "internal:8080", "", "", false); err != nil {
+	if err := WriteDeployment(w.p, "shop", "shop", "", "internal:8080", "", "", "", false); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 	w.playReconciler() // first pass: notices

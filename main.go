@@ -251,6 +251,10 @@ func main() {
 	mux.HandleFunc("POST /deploy/{name}/now", s.guard(s.deployNow))
 	mux.HandleFunc("POST /deploy/{name}/edit", s.guard(s.deployEdit))
 	mux.HandleFunc("POST /deploy/{name}/rollback", s.guard(s.deployRollback))
+	mux.HandleFunc("GET /partials/envpane/{name}", s.guard(s.envPane))
+	mux.HandleFunc("POST /env/create", s.guard(s.envCreate))
+	mux.HandleFunc("POST /env/save", s.guard(s.envSave))
+	mux.HandleFunc("POST /env/delete", s.guard(s.envDelete))
 	mux.HandleFunc("POST /deploy/inspect", s.guard(s.sourceInspect))
 	mux.HandleFunc("POST /deploy/enroll", s.guard(s.fleetEnroll))
 	mux.HandleFunc("POST /deploy/preview", s.guard(s.sourcePreview))
@@ -292,6 +296,7 @@ func (s *server) parseTemplates() {
 		"events":        template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/events.html")),
 		"logpane":       template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/logpane.html")),
 		"termpane":      template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/termpane.html")),
+		"envpane":       template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/envpane.html")),
 	}
 }
 
@@ -322,6 +327,12 @@ type pageData struct {
 	Groups          []plystate.DeploymentGroup
 	Source          *sourceForm
 	Events          []plystate.Event
+
+	EnvFiles    []plystate.EnvFile
+	EnvExternal []plystate.ExternalEnvRef
+	EnvName     string
+	EnvContent  string
+	EnvRefs     []string
 }
 
 // sourceForm is the from-source wizard's state: inspection result plus the
@@ -599,8 +610,68 @@ func (s *server) renderDeploy(w http.ResponseWriter, deployErr string) {
 		if err != nil {
 			data.RegistryErr = err.Error()
 		}
+		data.EnvFiles, data.EnvExternal = plystate.EnvFiles(s.paths)
 	}
 	s.render(w, "deploy", "base.html", data)
+}
+
+// --- shared env files --------------------------------------------------------
+
+// envPane: the right drawer as a secrets editor. The content ships to an
+// authenticated session only, blurred until "reveal" — shoulder-surfing
+// protection, not a security boundary (the terminal button already hands
+// this user every container's environment).
+func (s *server) envPane(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	content, err := plystate.ReadEnvFile(s.paths, name)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	files, _ := plystate.EnvFiles(s.paths)
+	var refs []string
+	for _, f := range files {
+		if f.Name == name {
+			refs = f.Refs
+		}
+	}
+	s.render(w, "envpane", "envpane", pageData{EnvName: name, EnvContent: content, EnvRefs: refs})
+}
+
+// envCreate answers the "new env file" form with the editor pane (htmx
+// swaps it into the drawer) — nothing is written until save.
+func (s *server) envCreate(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimSpace(r.FormValue("name"))
+	name = strings.TrimSuffix(name, ".env") // "plybox.env" means well
+	if _, err := plystate.ReadEnvFile(s.paths, name); err != nil {
+		http.Redirect(w, r, "/deploy?err="+template.URLQueryEscaper(err.Error()), http.StatusSeeOther)
+		return
+	}
+	r.SetPathValue("name", name)
+	s.envPane(w, r)
+}
+
+func (s *server) envSave(w http.ResponseWriter, r *http.Request) {
+	name := r.FormValue("name")
+	if err := plystate.WriteEnvFile(s.paths, name, r.FormValue("content")); err != nil {
+		http.Redirect(w, r, "/deploy?err="+template.URLQueryEscaper(err.Error()), http.StatusSeeOther)
+		return
+	}
+	if r.FormValue("apply") == "1" {
+		if _, err := plystate.TouchEnvRefs(s.paths, name); err != nil {
+			http.Redirect(w, r, "/deploy?err="+template.URLQueryEscaper(err.Error()), http.StatusSeeOther)
+			return
+		}
+	}
+	http.Redirect(w, r, "/deploy", http.StatusSeeOther)
+}
+
+func (s *server) envDelete(w http.ResponseWriter, r *http.Request) {
+	if err := plystate.DeleteEnvFile(s.paths, r.FormValue("name")); err != nil {
+		http.Redirect(w, r, "/deploy?err="+template.URLQueryEscaper(err.Error()), http.StatusSeeOther)
+		return
+	}
+	http.Redirect(w, r, "/deploy", http.StatusSeeOther)
 }
 
 func (s *server) deployCreate(w http.ResponseWriter, r *http.Request) {
@@ -612,6 +683,7 @@ func (s *server) deployCreate(w http.ResponseWriter, r *http.Request) {
 		strings.TrimSpace(r.FormValue("publish")),
 		strings.TrimSpace(r.FormValue("domain")),
 		r.FormValue("env"),
+		strings.TrimSpace(r.FormValue("env_file")),
 		r.FormValue("grant_links") == "1",
 	)
 	if err != nil {
