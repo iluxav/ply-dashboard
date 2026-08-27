@@ -107,6 +107,9 @@ func (f *freshness) sweep() {
 		var tip *remoteTip
 		switch {
 		case d.Field("github") != "":
+			if d.Field("tag_prefix") != "" {
+				continue // prefix streams need the releases list; not wired yet
+			}
 			latest, err := github.LatestRelease(d.Field("github"), f.secret(d))
 			if err != nil {
 				continue
