@@ -524,3 +524,17 @@ func History(p Paths, name string, limit int) []Event {
 	}
 	return out
 }
+
+// Fleet reads the sync state a fleet host's reconcile writes — nil on
+// hosts that don't follow a repo.
+func Fleet(p Paths) *DeployStatus {
+	raw, err := os.ReadFile(filepath.Join(p.Deployments, ".status", "fleet.json"))
+	if err != nil {
+		return nil
+	}
+	var st DeployStatus
+	if json.Unmarshal(raw, &st) != nil {
+		return nil
+	}
+	return &st
+}

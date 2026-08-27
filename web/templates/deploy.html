@@ -9,6 +9,13 @@
 </div>
 {{else}}
 
+{{with .Fleet}}
+<div class="flex items-baseline gap-3 border {{if .OK}}border-edge{{else}}border-red-900/60{{end}} rounded px-3 py-2 mb-6 text-xs">
+  <span class="text-accent/80 text-[10px] uppercase tracking-wider">fleet</span>
+  <span class="{{if .OK}}text-fade/70{{else}}text-red-400{{end}}">{{if .OK}}synced {{.Detail}}{{else}}sync failing: {{.Detail}}{{end}}</span>
+  <span class="text-fade/35 ml-auto">git-managed specs converge every beat; files created here coexist</span>
+</div>
+{{end}}
 <h2 class="text-accent/80 text-[10px] uppercase tracking-wider mb-3">new deployment · from registry</h2>
 {{with .RegistryErr}}<div class="text-accent text-xs mb-3">registry unreachable: {{.}}</div>{{end}}
 {{with .DeployErr}}<div class="text-red-400 text-xs mb-3 border border-red-900/60 rounded px-3 py-2">{{.}}</div>{{end}}

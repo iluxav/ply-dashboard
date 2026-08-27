@@ -313,6 +313,7 @@ type pageData struct {
 	LastResult *plystate.CommandResult
 
 	DeployAvailable bool
+	Fleet           *plystate.DeployStatus
 	RegistryApps    []registry.App
 	RegistryErr     string
 	DeployErr       string
@@ -588,6 +589,7 @@ func (s *server) renderDeploy(w http.ResponseWriter, deployErr string) {
 		DeployAvailable: plystate.DeploymentsAvailable(s.paths),
 		Deployments:     plystate.Deployments(s.paths),
 		DeployErr:       deployErr,
+		Fleet:           plystate.Fleet(s.paths),
 	}
 	if data.DeployAvailable {
 		apps, err := s.registry.Apps()
