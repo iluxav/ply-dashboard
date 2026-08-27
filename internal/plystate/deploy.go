@@ -267,6 +267,7 @@ type SourceSpec struct {
 	Publish    string
 	Domain     string
 	Env        string // KEY=VALUE lines
+	Manual     bool   // render auto = false: converge only on touch/deploy-now
 }
 
 // Render validates and returns the exact TOML the deployment file will
@@ -300,6 +301,9 @@ func (s SourceSpec) Render() (string, error) {
 		if v := strings.TrimSpace(value); v != "" {
 			fmt.Fprintf(&b, "%s = %q\n", key, v)
 		}
+	}
+	if s.Manual {
+		b.WriteString("auto = false\n")
 	}
 	writeOpt("ref", s.Ref)
 	writeOpt("deploy_key", s.DeployKey)
@@ -373,6 +377,7 @@ type GithubSpec struct {
 	Publish   string
 	Domain    string
 	Env       string
+	Manual    bool // render auto = false: converge only on touch/deploy-now
 }
 
 var orgRepo = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
@@ -391,6 +396,9 @@ func (s GithubSpec) Render() (string, error) {
 		if v := strings.TrimSpace(value); v != "" {
 			fmt.Fprintf(&b, "%s = %q\n", key, v)
 		}
+	}
+	if s.Manual {
+		b.WriteString("auto = false\n")
 	}
 	if strings.TrimSpace(s.Asset) != s.Name {
 		writeOpt("asset", s.Asset)

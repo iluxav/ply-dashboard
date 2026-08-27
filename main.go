@@ -836,6 +836,7 @@ func specFromForm(r *http.Request) plystate.SourceSpec {
 		Publish:    strings.TrimSpace(r.FormValue("publish")),
 		Domain:     strings.TrimSpace(r.FormValue("domain")),
 		Env:        r.FormValue("env"),
+		Manual:     r.FormValue("manual") == "1",
 	}
 }
 
@@ -848,6 +849,7 @@ func githubFromForm(r *http.Request) plystate.GithubSpec {
 		Publish: strings.TrimSpace(r.FormValue("publish")),
 		Domain:  strings.TrimSpace(r.FormValue("domain")),
 		Env:     r.FormValue("env"),
+		Manual:  r.FormValue("manual") == "1",
 	}
 }
 
