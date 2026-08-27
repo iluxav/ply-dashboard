@@ -29,6 +29,7 @@ type Inspection struct {
 	Framework     string   // ply | nextjs | node | go | rust | unknown
 	Note          string   // one human sentence about what that means
 	Release       *Release // latest release carrying a .img for this arch, if any
+	FleetHosts    []string // hosts/<name>/ dirs — the repo is a fleet, not an app
 }
 
 // Release: the CI-image lane's offer — the latest release ships a ply
@@ -108,7 +109,34 @@ func Inspect(rawURL, token string) (Inspection, error) {
 
 	insp.probe(token)
 	insp.Release = latestImageRelease(repo, token)
+	insp.FleetHosts = fleetHosts(repo, token)
+	if len(insp.FleetHosts) > 0 {
+		insp.Note = "this is a FLEET repo — enroll this host and its apps sync from git every reconcile beat"
+	}
 	return insp, nil
+}
+
+// fleetHosts: a repo with hosts/<name>/ dirs is an infra repo — offer
+// enrollment instead of an app deployment.
+func fleetHosts(repo, token string) []string {
+	status, body, err := getAuth("https://api.github.com/repos/"+repo+"/contents/hosts", token)
+	if err != nil || status != http.StatusOK {
+		return nil
+	}
+	var entries []struct {
+		Name string `json:"name"`
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(body, &entries) != nil {
+		return nil
+	}
+	var hosts []string
+	for _, e := range entries {
+		if e.Type == "dir" {
+			hosts = append(hosts, e.Name)
+		}
+	}
+	return hosts
 }
 
 // probe sniffs well-known files and decides the framework. Public repos

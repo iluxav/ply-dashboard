@@ -252,6 +252,7 @@ func main() {
 	mux.HandleFunc("POST /deploy/{name}/edit", s.guard(s.deployEdit))
 	mux.HandleFunc("POST /deploy/{name}/rollback", s.guard(s.deployRollback))
 	mux.HandleFunc("POST /deploy/inspect", s.guard(s.sourceInspect))
+	mux.HandleFunc("POST /deploy/enroll", s.guard(s.fleetEnroll))
 	mux.HandleFunc("POST /deploy/preview", s.guard(s.sourcePreview))
 	mux.HandleFunc("POST /deploy/source", s.guard(s.sourceCreate))
 
@@ -817,6 +818,30 @@ func (s *server) sourceCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	s.fresh.Kick()
 	w.Header().Set("HX-Redirect", "/deploy")
+}
+
+// fleetEnroll: pasting an infra repo enrolls the host — the config is a
+// file in the deployments dir, and the write itself triggers the first
+// sync. The grant is the authority; no ssh, no setup command.
+func (s *server) fleetEnroll(w http.ResponseWriter, r *http.Request) {
+	repo := strings.TrimSpace(r.FormValue("repo"))
+	host := strings.TrimSpace(r.FormValue("host"))
+	token := strings.TrimSpace(r.FormValue("token"))
+	tokenRef := ""
+	if token != "" {
+		ref, err := plystate.WriteToken(s.paths, "fleet", token)
+		if err != nil {
+			http.Redirect(w, r, "/deploy?err="+template.URLQueryEscaper(err.Error()), http.StatusSeeOther)
+			return
+		}
+		tokenRef = ref
+	}
+	if err := plystate.WriteFleetConfig(s.paths, repo, host, tokenRef); err != nil {
+		http.Redirect(w, r, "/deploy?err="+template.URLQueryEscaper(err.Error()), http.StatusSeeOther)
+		return
+	}
+	s.fresh.Kick()
+	http.Redirect(w, r, "/deploy", http.StatusSeeOther)
 }
 
 // renderFromForm builds the lane's spec exactly as create would (token

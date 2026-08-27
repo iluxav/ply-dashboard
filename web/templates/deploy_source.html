@@ -14,7 +14,25 @@
 {{with .Source}}
   {{with .Error}}<div class="text-red-400 text-xs mt-3 border border-red-900/60 rounded px-3 py-2">{{.}}</div>{{end}}
   {{if .Inspected}}
+  {{if .Insp.FleetHosts}}
 
+  <div class="mt-3 border border-accent/40 rounded px-4 py-3">
+    <div class="text-accent/80 text-[10px] uppercase tracking-wider mb-2">fleet repo detected</div>
+    <div class="text-fade/70 text-xs mb-3">enroll this host and its apps sync from <span class="text-ink">{{.Insp.Repo}}</span> every reconcile beat — deployments become git commits; files created here locally keep coexisting</div>
+    <form method="post" action="/deploy/enroll" class="flex flex-wrap gap-2 items-end text-xs">
+      <input type="hidden" name="repo" value="{{.Spec.Repo}}">
+      <input type="hidden" name="token" value="{{.Token}}">
+      <label class="grid gap-1">
+        <span class="text-fade/50">this host follows</span>
+        <select name="host" class="bg-card border border-edge rounded px-2 py-1.5 text-ink">
+          {{range .Insp.FleetHosts}}<option>{{.}}</option>{{end}}
+        </select>
+      </label>
+      <button class="bg-accent text-ground rounded px-4 py-1.5 font-bold hover:bg-accent-bright">enroll this host</button>
+    </form>
+  </div>
+
+  {{else}}
   <div class="mt-3 text-xs">
     {{if .Insp.Markers}}
       <span class="text-fade/50">detected:</span>
@@ -158,6 +176,7 @@
       <span class="text-fade/35 ml-3">{{if eq .Lane "release"}}`ply reconcile` downloads the release image and runs it{{else}}systemd notices the file, `ply reconcile` clones and builds on this host{{end}}</span>
     </div>
   </form>
+  {{end}}
   {{end}}
 {{end}}
 </div>

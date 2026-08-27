@@ -632,3 +632,25 @@ func Fleet(p Paths) *DeployStatus {
 	}
 	return &st
 }
+
+// WriteFleetConfig enrolls this host in a fleet: the config is a file in
+// the deployments dir (the grant IS the authority — whoever may deploy
+// apps may enroll the host), and writing it triggers the first sync.
+func WriteFleetConfig(p Paths, repo, host, tokenRef string) error {
+	if !regexp.MustCompile(`^[A-Za-z0-9@:/._-]+$`).MatchString(repo) || repo == "" {
+		return fmt.Errorf("bad repo URL %q", repo)
+	}
+	if !regexp.MustCompile(`^[A-Za-z0-9._-]+$`).MatchString(host) {
+		return fmt.Errorf("bad host name %q", host)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "repo = %q\nhost = %q\n", repo, host)
+	if tokenRef != "" {
+		fmt.Fprintf(&b, "token_file = %q\n", tokenRef)
+	}
+	tmp := filepath.Join(p.Deployments, "..fleet.toml.tmp")
+	if err := os.WriteFile(tmp, []byte(b.String()), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, filepath.Join(p.Deployments, ".fleet.toml"))
+}
