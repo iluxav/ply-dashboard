@@ -916,14 +916,15 @@ func (s *server) wireStack(name string, services []plystate.StackService, stack,
 
 func githubFromForm(r *http.Request) plystate.GithubSpec {
 	return plystate.GithubSpec{
-		Name:    strings.TrimSpace(r.FormValue("name")),
-		Repo:    strings.TrimSpace(r.FormValue("gh_repo")),
-		Asset:   strings.TrimSpace(r.FormValue("gh_asset")),
-		Version: strings.TrimSpace(r.FormValue("gh_version")),
-		Publish: strings.TrimSpace(r.FormValue("publish")),
-		Domain:  strings.TrimSpace(r.FormValue("domain")),
-		Env:     r.FormValue("env"),
-		Manual:  r.FormValue("manual") == "1",
+		Name:      strings.TrimSpace(r.FormValue("name")),
+		Repo:      strings.TrimSpace(r.FormValue("gh_repo")),
+		Asset:     strings.TrimSpace(r.FormValue("gh_asset")),
+		Version:   strings.TrimSpace(r.FormValue("gh_version")),
+		TagPrefix: strings.TrimSpace(r.FormValue("gh_tag_prefix")),
+		Publish:   strings.TrimSpace(r.FormValue("publish")),
+		Domain:    strings.TrimSpace(r.FormValue("domain")),
+		Env:       r.FormValue("env"),
+		Manual:    r.FormValue("manual") == "1",
 	}
 }
 

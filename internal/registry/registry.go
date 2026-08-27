@@ -13,15 +13,27 @@ import (
 const appsStateURL = "https://registry.plybox.sh/apps/state.json"
 
 type App struct {
+	Owner       string
 	Name        string
+	Type        string
 	Description string
+	Contract    string   // env lines to prefill on deploy
+	Publish     string   // suggested --publish
+	GrantLinks  bool     // the app needs its [requests] links granted
+	Origin      string   // phantom packages: where the bytes actually live
 	Versions    []string // newest first, deduped across arches
 }
 
 type state struct {
 	Packages []struct {
+		Owner       string `json:"owner"`
 		Name        string `json:"name"`
+		Type        string `json:"type"`
 		Description string `json:"description"`
+		Contract    string `json:"contract"`
+		Publish     string `json:"publish"`
+		GrantLinks  bool   `json:"grant_links"`
+		Origin      string `json:"origin"`
 		Versions    []struct {
 			Version string `json:"version"`
 		} `json:"versions"`
@@ -74,7 +86,29 @@ func fetch(url string) ([]App, error) {
 			}
 		}
 		sort.Sort(sort.Reverse(sort.StringSlice(versions)))
-		apps = append(apps, App{Name: p.Name, Description: p.Description, Versions: versions})
+		if p.Type != "" && p.Type != "app" {
+			continue // layers and stacks are not one-click installs (yet)
+		}
+		app := App{
+			Owner:       p.Owner,
+			Name:        p.Name,
+			Type:        p.Type,
+			Description: p.Description,
+			Contract:    p.Contract,
+			Publish:     p.Publish,
+			GrantLinks:  p.GrantLinks,
+			Origin:      p.Origin,
+			Versions:    versions,
+		}
+		// catalog wins; the compiled-in table is only a fallback for
+		// registries that predate metadata v2
+		if app.Contract == "" {
+			app.Contract = Contract(p.Name)
+		}
+		if app.Publish == "" {
+			app.Publish = DefaultPublish(p.Name)
+		}
+		apps = append(apps, app)
 	}
 	sort.Slice(apps, func(a, b int) bool { return apps[a].Name < apps[b].Name })
 	return apps, nil

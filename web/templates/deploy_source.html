@@ -61,6 +61,10 @@
       <input name="gh_version" value="{{.Gh.Version}}" placeholder="follow latest" class="bg-card border border-edge rounded px-2 py-1.5 text-ink">
     </label>
     <label class="grid gap-1">
+      <span class="text-fade/50">tag prefix <span class="text-fade/35">(monorepos: follow e.g. web-v&lt;x.y.z&gt;, leave the repo's latest alone)</span></span>
+      <input name="gh_tag_prefix" value="{{.Gh.TagPrefix}}" placeholder="" class="bg-card border border-edge rounded px-2 py-1.5 text-ink font-mono">
+    </label>
+    <label class="grid gap-1">
       <span class="text-fade/50">publish (ADDR:PORT)</span>
       <input name="publish" value="{{.Gh.Publish}}" placeholder="internal:8080" class="bg-card border border-edge rounded px-2 py-1.5 text-ink">
     </label>

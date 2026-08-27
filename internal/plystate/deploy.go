@@ -464,6 +464,7 @@ type GithubSpec struct {
 	Repo      string // org/repo
 	Asset     string // app name in <asset>-<ver>-linux-<arch>.img; blank = deployment name
 	Version   string // exact x.y.z pins; prefix follows; blank follows latest
+	TagPrefix string // monorepo release streams: follow `<prefix><x.y.z>` tags
 	TokenFile string // path reference for private repos
 	Publish   string
 	Domain    string
@@ -499,6 +500,7 @@ func (s GithubSpec) Render() (string, error) {
 		writeOpt("asset", s.Asset)
 	}
 	writeOpt("version", s.Version)
+	writeOpt("tag_prefix", s.TagPrefix)
 	writeOpt("token_file", s.TokenFile)
 	if v := strings.TrimSpace(s.Publish); v != "" {
 		fmt.Fprintf(&b, "publish = [%q]\n", v)

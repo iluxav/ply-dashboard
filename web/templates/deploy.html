@@ -42,7 +42,7 @@
       </label>
       <label class="grid gap-1">
         <span class="text-fade/50">publish (ADDR:PORT)</span>
-        <input name="publish" value="{{defaultPublish .Name}}" class="bg-card border border-edge rounded px-2 py-1.5 text-ink">
+        <input name="publish" value="{{.Publish}}" class="bg-card border border-edge rounded px-2 py-1.5 text-ink">
       </label>
       <label class="grid gap-1">
         <span class="text-fade/50">domain (optional, via the edge)</span>
@@ -50,10 +50,10 @@
       </label>
       <label class="grid gap-1 md:col-span-2">
         <span class="text-fade/50">env (KEY=VALUE per line; blank values are dropped)</span>
-        <textarea name="env" rows="3" class="bg-card border border-edge rounded px-2 py-1.5 text-ink font-mono">{{contract .Name}}</textarea>
+        <textarea name="env" rows="3" class="bg-card border border-edge rounded px-2 py-1.5 text-ink font-mono">{{.Contract}}</textarea>
       </label>
       <label class="flex items-center gap-1.5 text-fade/50 md:col-span-2">
-        <input type="checkbox" name="grant_links" value="1">
+        <input type="checkbox" name="grant_links" value="1" {{if .GrantLinks}}checked{{end}}>
         grant the links the image requests (dashboard-style apps: notify needs it to read the events journal)
       </label>
       <div class="md:col-span-2">
