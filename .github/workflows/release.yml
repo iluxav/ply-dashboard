@@ -17,7 +17,7 @@ jobs:
 
       - name: install ply + tailwind
         run: |
-          curl -fsSL https://plybox.sh/install.sh | sh
+          curl -fsSL https://i.plybox.sh/install.sh | PLY_WIZARD=no sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           mkdir -p bin
           curl -fsSL -o bin/tailwindcss https://github.com/tailwindlabs/tailwindcss/releases/download/v3.4.17/tailwindcss-linux-x64
