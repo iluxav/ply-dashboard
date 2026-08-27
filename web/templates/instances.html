@@ -1,54 +1,78 @@
 {{define "instances"}}
-<table class="w-full">
+{{$fresh := freshOf .AppName}}
+{{with $fresh}}
+  {{if .Building}}
+  <div class="flex items-center gap-3 border border-edge rounded px-3 py-2 mb-4 text-xs">
+    <span class="text-accent animate-pulse">building…</span>
+    <span class="text-fade/50">the {{$.AppName}}-builder app has the live build logs</span>
+  </div>
+  {{else if .UpdateAvailable}}
+  <div class="flex items-center gap-3 border border-deep rounded px-3 py-2 mb-4 text-xs">
+    <span class="text-accent">update available: {{.Latest}}</span>
+    <span class="text-fade/50">running {{.Current}}</span>
+    <form method="post" action="/deploy/{{$.AppName}}/now" class="ml-auto">
+      <button class="text-accent hover:text-accent-bright border border-deep rounded px-2 py-0.5">deploy now</button>
+    </form>
+  </div>
+  {{end}}
+{{end}}
+<table class="w-full table-fixed">
   <thead>
-    <tr class="text-zinc-600 text-left text-xs border-b border-zinc-800">
-      <th class="py-1 pr-4 font-normal">instance</th>
-      <th class="py-1 pr-4 font-normal text-right">pid</th>
-      <th class="py-1 pr-4 font-normal">ip</th>
-      <th class="py-1 pr-4 font-normal text-right">uptime</th>
-      <th class="py-1 pr-4 font-normal text-right">restarts</th>
+    <tr class="text-fade/50 text-left text-xs border-b border-edge">
+      <th class="py-1 pr-4 font-normal w-36">instance</th>
+      <th class="py-1 pr-4 font-normal text-right w-16">pid</th>
+      <th class="py-1 pr-4 font-normal w-24">ip</th>
+      <th class="py-1 pr-4 font-normal text-right w-16">uptime</th>
+      <th class="py-1 pr-4 font-normal text-right w-16">restarts</th>
       <th class="py-1 pr-4 font-normal">cpu</th>
       <th class="py-1 font-normal">mem</th>
     </tr>
   </thead>
   <tbody>
   {{range .Instances}}
-    <tr class="border-b border-zinc-900">
-      <td class="py-1.5 pr-4">
+    <tr class="border-b border-edge/60">
+      <td class="py-1.5 pr-4 truncate">
         <span class="{{if .Alive}}text-green-400{{else}}text-red-400{{end}}">●</span>
-        <span class="text-zinc-100 ml-1">{{.Name}}</span>
+        <span class="text-ink ml-1">{{.Name}}</span>
       </td>
-      <td class="py-1.5 pr-4 text-right text-zinc-500">{{.PID}}</td>
-      <td class="py-1.5 pr-4 text-zinc-500">{{.IP}}</td>
-      <td class="py-1.5 pr-4 text-right text-zinc-500">{{.UptimeShort}}</td>
-      <td class="py-1.5 pr-4 text-right {{if gt .Restarts 0}}text-amber-400{{end}}">{{.Restarts}}</td>
+      <td class="py-1.5 pr-4 text-right text-fade/70">{{.PID}}</td>
+      <td class="py-1.5 pr-4 text-fade/70 truncate">{{.IP}}</td>
+      <td class="py-1.5 pr-4 text-right text-fade/70">{{.UptimeShort}}</td>
+      <td class="py-1.5 pr-4 text-right {{if gt .Restarts 0}}text-accent{{end}}">{{.Restarts}}</td>
       {{$st := statsOf .Name}}
-      <td class="py-1.5 pr-4"><span class="text-green-500/70">{{$st.CPUSpark}}</span> <span class="text-zinc-400">{{$st.CPUNow}}</span></td>
-      <td class="py-1.5"><span class="text-sky-500/70">{{$st.MemSpark}}</span> <span class="text-zinc-400">{{$st.MemNow}}</span></td>
+      <td class="py-1.5 pr-4 whitespace-nowrap overflow-hidden"><span class="text-fade inline-block w-16">{{$st.CPUNow}}</span> <span class="text-accent/70">{{$st.CPUSpark}}</span></td>
+      <td class="py-1.5 whitespace-nowrap overflow-hidden"><span class="text-fade inline-block w-20">{{$st.MemNow}}</span> <span class="text-fade/60">{{$st.MemSpark}}</span></td>
     </tr>
   {{end}}
   </tbody>
 </table>
-<div class="text-zinc-600 text-xs mt-3 space-x-4">
-  {{with .App.PublishedAddr}}<span>published <span class="text-zinc-400">{{.}}</span></span>{{end}}
-  {{range .App.Domains}}<a class="text-sky-400 hover:underline" href="https://{{.}}">{{.}}</a>{{end}}
-  <span>image <span class="text-zinc-400">{{(.App.Oldest).ImageVersion}}</span></span>
+<div class="text-fade/50 text-xs mt-3 space-x-4">
+  {{with .App.PublishedAddr}}<span>published <span class="text-fade">{{.}}</span></span>{{end}}
+  {{range .App.Domains}}<a class="text-fade hover:underline" href="https://{{.}}">{{.}}</a>{{end}}
+  <span>image <span class="text-fade">{{(.App.Oldest).ImageVersion}}</span></span>
 </div>
 
-{{if .Writable}}
+{{if isBuilder .AppName}}
+<div class="text-fade/50 text-xs mt-4">throwaway builder — alive only while a build runs; its stdout above IS the build log</div>
+{{else if .Writable}}
 <div class="flex items-center gap-2 mt-4 text-xs">
-  <span class="text-zinc-600">scale</span>
+  <span class="text-fade/50">scale</span>
   <button hx-post="/app/{{.AppName}}/scale?to={{.ScaleDown}}" hx-target="#live" hx-swap="innerHTML"
-          class="border border-zinc-800 rounded px-2 py-0.5 hover:border-zinc-500 {{if le (len .Instances) 1}}opacity-30 pointer-events-none{{end}}">−</button>
-  <span class="text-zinc-100 w-4 text-center">{{len .Instances}}</span>
+          class="border border-edge rounded px-2 py-0.5 hover:border-accent {{if le (len .Instances) 1}}opacity-30 pointer-events-none{{end}}">−</button>
+  <span class="text-ink w-4 text-center">{{len .Instances}}</span>
   <button hx-post="/app/{{.AppName}}/scale?to={{.ScaleUp}}" hx-target="#live" hx-swap="innerHTML"
-          class="border border-zinc-800 rounded px-2 py-0.5 hover:border-zinc-500">+</button>
+          class="border border-edge rounded px-2 py-0.5 hover:border-accent">+</button>
   <button hx-post="/app/{{.AppName}}/restart" hx-target="#live" hx-swap="innerHTML"
           hx-confirm="Rolling restart of {{.AppName}} — one slot at a time, health-gated. Continue?"
-          class="border border-zinc-800 rounded px-2 py-0.5 hover:border-amber-400 ml-4">restart</button>
-  {{with .LastResult}}<span class="ml-4 {{if .OK}}text-zinc-500{{else}}text-red-400{{end}}">{{.}}</span>{{end}}
+          class="border border-edge rounded px-2 py-0.5 hover:border-accent ml-4">restart</button>
+  <span class="text-fade/50 ml-4">terminal</span>
+  {{range .Instances}}{{if .Alive}}
+  <button hx-get="/partials/termpane/{{.App}}/{{.N}}" hx-target="#drawer" hx-swap="innerHTML"
+          class="border border-edge rounded px-2 py-0.5 hover:border-accent">.{{.N}}</button>
+  {{end}}{{end}}
+  {{with .LastResult}}<span class="ml-4 {{if .OK}}text-fade/70{{else}}text-red-400{{end}}">{{.}}</span>{{end}}
 </div>
 {{else}}
-<div class="text-zinc-700 text-xs mt-4">observe-only — the apps dir grant is read-only; commands need it writable</div>
+<div class="text-fade/35 text-xs mt-4">observe-only — the apps dir grant is read-only; commands need it writable</div>
 {{end}}
 {{end}}

@@ -2,13 +2,22 @@
 @tailwind components;
 @tailwind utilities;
 
-/* thin, quiet scrollbars everywhere — terminal spirit */
+/* thin, quiet scrollbars everywhere — terminal spirit, plybox.sh palette */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #3f3f46 transparent;
+  scrollbar-color: #3a2a20 transparent;
 }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: #52525b; }
+::-webkit-scrollbar-thumb { background: #3a2a20; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #5a3828; }
 ::-webkit-scrollbar-corner { background: transparent; }
+
+::selection { background: #5a3828; color: #e7e9e5; }
+:focus-visible { outline: 2px solid #ffbd81; outline-offset: 2px; }
+
+/* the log/terminal drawer is a split, not an overlay: content shifts left */
+#page { transition: margin-right 0.15s ease; }
+@media (min-width: 1100px) {
+  body:has(#drawer:not(:empty)) #page { margin-right: var(--drawer-w, 52rem); }
+}

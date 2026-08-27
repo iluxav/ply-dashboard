@@ -133,6 +133,13 @@ func readUint(path string) uint64 {
 	return n
 }
 
+func tail[T any](ring []T, n int) []T {
+	if len(ring) > n {
+		return ring[len(ring)-n:]
+	}
+	return ring
+}
+
 func push[T any](ring []T, v T) []T {
 	ring = append(ring, v)
 	if len(ring) > ringLen {
@@ -157,8 +164,10 @@ func (s *Sampler) Stats(name string) Stats {
 		return Stats{CPUSpark: "", CPUNow: "-", MemSpark: "", MemNow: "-"}
 	}
 	st := Stats{
-		CPUSpark: spark(sr.cpuPct, 0), // 0 = auto-scale
-		MemSpark: sparkU(sr.memBytes),
+		// full ring is history; the sparkline shows the last 24 beats so
+		// the column has a bounded width and never squashes its neighbors
+		CPUSpark: spark(tail(sr.cpuPct, 24), 0), // 0 = auto-scale
+		MemSpark: sparkU(tail(sr.memBytes, 24)),
 	}
 	if len(sr.cpuPct) > 0 {
 		st.CPUNow = fmt.Sprintf("%.1f%%", sr.cpuPct[len(sr.cpuPct)-1])

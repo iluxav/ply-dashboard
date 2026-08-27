@@ -69,6 +69,18 @@ func newMockWorld(root string) *mockWorld {
 	w.event(now.Add(-5*time.Hour), "nextapp", "scale", "1 -> 2")
 	w.event(now.Add(-95*time.Second), "worker", "deploy-failed", "build failed (exit 101) — `ply logs worker-builder` has the output")
 	w.event(now.Add(-47*time.Second), "worker", "instance-restart", "worker.1 respawned (restart #7)")
+	// a dead builder's ring: the post-mortem the failed-deploy event links to
+	for _, line := range []string{
+		"npm warn deprecated glob@7.2.3",
+		"added 214 packages in 42s",
+		"> worker@0.3.1 build",
+		"> cargo build --release",
+		"   Compiling worker v0.3.1 (/work)",
+		"error[E0308]: mismatched types --> src/consume.rs:47:18",
+		"error: could not compile `worker` (bin \"worker\") due to 1 previous error",
+	} {
+		appendFile(w.logPath("worker-builder", 1), line+"\n")
+	}
 	return w
 }
 

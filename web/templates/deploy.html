@@ -1,66 +1,66 @@
 {{define "title"}}ply · deploy{{end}}
-{{define "crumb"}}deploy{{end}}
+{{define "crumb"}}{{end}}
 {{define "content"}}
 {{if not .DeployAvailable}}
-<div class="text-zinc-600 py-10 text-center text-xs">
+<div class="text-fade/50 py-10 text-center text-xs">
   the deployments dir isn't granted (or writable) — run the dashboard with
-  <span class="text-zinc-400">--grant-links</span> on a host prepared by
-  <span class="text-zinc-400">sudo ply setup --edge</span>
+  <span class="text-fade">--grant-links</span> on a host prepared by
+  <span class="text-fade">sudo ply setup --edge</span>
 </div>
 {{else}}
 
-<h2 class="text-zinc-500 text-xs uppercase tracking-widest mb-3">new deployment · from registry</h2>
-{{with .RegistryErr}}<div class="text-amber-400 text-xs mb-3">registry unreachable: {{.}}</div>{{end}}
+<h2 class="text-accent/80 text-[10px] uppercase tracking-wider mb-3">new deployment · from registry</h2>
+{{with .RegistryErr}}<div class="text-accent text-xs mb-3">registry unreachable: {{.}}</div>{{end}}
 {{with .DeployErr}}<div class="text-red-400 text-xs mb-3 border border-red-900/60 rounded px-3 py-2">{{.}}</div>{{end}}
 
 <div class="space-y-2">
 {{range .RegistryApps}}
-  <details class="border border-zinc-800 rounded">
-    <summary class="px-3 py-2 cursor-pointer hover:bg-zinc-900/50 flex items-baseline gap-3">
-      <span class="text-zinc-100">{{.Name}}</span>
-      <span class="text-zinc-600 text-xs">{{index .Versions 0}}</span>
-      <span class="text-zinc-600 text-xs">{{.Description}}</span>
+  <details class="border border-edge rounded">
+    <summary class="px-3 py-2 cursor-pointer hover:bg-card/70 flex items-baseline gap-3">
+      <span class="text-ink">{{.Name}}</span>
+      <span class="text-fade/50 text-xs">{{index .Versions 0}}</span>
+      <span class="text-fade/50 text-xs">{{.Description}}</span>
     </summary>
-    <form method="post" action="/deploy" class="px-3 py-3 border-t border-zinc-900 grid gap-2 text-xs md:grid-cols-2">
+    <form method="post" action="/deploy" class="px-3 py-3 border-t border-edge/60 grid gap-2 text-xs md:grid-cols-2">
       <input type="hidden" name="app" value="{{.Name}}">
       <label class="grid gap-1">
-        <span class="text-zinc-600">deployment name</span>
-        <input name="name" value="{{.Name}}" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100">
+        <span class="text-fade/50">deployment name</span>
+        <input name="name" value="{{.Name}}" class="bg-card border border-edge rounded px-2 py-1.5 text-ink">
       </label>
       <label class="grid gap-1">
-        <span class="text-zinc-600">version</span>
-        <select name="version" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100">
+        <span class="text-fade/50">version</span>
+        <select name="version" class="bg-card border border-edge rounded px-2 py-1.5 text-ink">
           {{range .Versions}}<option>{{.}}</option>{{end}}
         </select>
       </label>
       <label class="grid gap-1">
-        <span class="text-zinc-600">publish (ADDR:PORT)</span>
-        <input name="publish" value="{{defaultPublish .Name}}" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100">
+        <span class="text-fade/50">publish (ADDR:PORT)</span>
+        <input name="publish" value="{{defaultPublish .Name}}" class="bg-card border border-edge rounded px-2 py-1.5 text-ink">
       </label>
       <label class="grid gap-1">
-        <span class="text-zinc-600">domain (optional, via the edge)</span>
-        <input name="domain" placeholder="db.example.com" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100">
+        <span class="text-fade/50">domain (optional, via the edge)</span>
+        <input name="domain" placeholder="db.example.com" class="bg-card border border-edge rounded px-2 py-1.5 text-ink">
       </label>
       <label class="grid gap-1 md:col-span-2">
-        <span class="text-zinc-600">env (KEY=VALUE per line; blank values are dropped)</span>
-        <textarea name="env" rows="3" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100 font-mono">{{contract .Name}}</textarea>
+        <span class="text-fade/50">env (KEY=VALUE per line; blank values are dropped)</span>
+        <textarea name="env" rows="3" class="bg-card border border-edge rounded px-2 py-1.5 text-ink font-mono">{{contract .Name}}</textarea>
       </label>
       <div class="md:col-span-2">
-        <button class="bg-zinc-100 text-zinc-950 rounded px-4 py-1.5 font-bold hover:bg-white">deploy</button>
-        <span class="text-zinc-700 ml-3">writes /var/lib/ply/deployments/&lt;name&gt;.toml — systemd notices, `ply reconcile` runs it</span>
+        <button class="bg-accent text-ground rounded px-4 py-1.5 font-bold hover:bg-accent-bright">deploy</button>
+        <span class="text-fade/35 ml-3">writes /var/lib/ply/deployments/&lt;name&gt;.toml — systemd notices, `ply reconcile` runs it</span>
       </div>
     </form>
   </details>
 {{else}}
-  <div class="text-zinc-600 text-xs">no runnable apps in the registry catalog</div>
+  <div class="text-fade/50 text-xs">no runnable apps in the registry catalog</div>
 {{end}}
 </div>
 
-<h2 class="text-zinc-500 text-xs uppercase tracking-widest mt-10 mb-3">new deployment · from source</h2>
-<div class="text-zinc-600 text-xs mb-3">paste a repo — the droplet clones and builds it, no CI needed; public repos are inspected for a preset</div>
+<h2 class="text-accent/80 text-[10px] uppercase tracking-wider mt-10 mb-3">new deployment · from source</h2>
+<div class="text-fade/50 text-xs mb-3">paste a repo — the droplet clones and builds it, no CI needed; public repos are inspected for a preset</div>
 {{template "deploy_source" .}}
 
-<h2 class="text-zinc-500 text-xs uppercase tracking-widest mt-10 mb-3">deployments on this host</h2>
+<h2 class="text-accent/80 text-[10px] uppercase tracking-wider mt-10 mb-3">deployments on this host</h2>
 <div hx-get="/partials/deployments" hx-trigger="every 3s" hx-swap="innerHTML">
   {{template "deployments" .}}
 </div>

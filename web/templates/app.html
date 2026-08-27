@@ -1,29 +1,30 @@
 {{define "title"}}ply · {{.AppName}}{{end}}
-{{define "crumb"}}apps / {{.AppName}}{{end}}
+{{define "crumb"}}<span class="text-fade/35 text-xs">/</span> <span class="text-ink/80 text-xs">{{.AppName}}</span>{{if isBuilder .AppName}} <span class="text-fade/50 border border-edge rounded px-1.5 text-xs">builder</span>{{end}}{{end}}
 {{define "content"}}
 <div id="live" hx-get="/partials/app/{{.AppName}}" hx-trigger="every 3s" hx-swap="innerHTML">
   {{template "instances" .}}
 </div>
 
-<h2 class="text-zinc-500 text-xs uppercase tracking-widest mt-10 mb-3">logs</h2>
+<h2 class="text-accent/80 text-[10px] uppercase tracking-wider mt-10 mb-3">logs</h2>
 <div hx-get="/partials/logs/{{.AppName}}" hx-trigger="every 3s" hx-swap="innerHTML">
   {{template "logs" .}}
 </div>
 
-<h2 class="text-zinc-500 text-xs uppercase tracking-widest mt-10 mb-3">events</h2>
+<h2 class="text-accent/80 text-[10px] uppercase tracking-wider mt-10 mb-3">events</h2>
 <div hx-get="/partials/events?app={{.AppName}}" hx-trigger="every 5s" hx-swap="innerHTML">
   {{template "events" .}}
 </div>
 
-<h2 class="text-zinc-500 text-xs uppercase tracking-widest mt-10 mb-3">commands</h2>
+{{if not (isBuilder .AppName)}}
+<h2 class="text-accent/80 text-[10px] uppercase tracking-wider mt-10 mb-3">commands</h2>
 <div class="space-y-1.5">
   {{range .Commands}}
   <div class="flex items-center gap-3 group">
-    <code class="flex-1 bg-zinc-900 border border-zinc-800 rounded px-3 py-1.5 text-zinc-300 overflow-x-auto whitespace-nowrap">{{.Cmd}}</code>
-    <button onclick="copyCmd(this)" data-cmd="{{.Cmd}}" class="text-zinc-600 hover:text-green-400 text-xs shrink-0 w-12 text-left">copy</button>
-    <span class="text-zinc-700 text-xs w-40 shrink-0 hidden md:inline">{{.What}}</span>
+    <code class="flex-1 bg-card border border-edge rounded px-3 py-1.5 text-ink/80 overflow-x-auto whitespace-nowrap">{{.Cmd}}</code>
+    <button onclick="copyCmd(this)" data-cmd="{{.Cmd}}" class="text-fade/50 hover:text-green-400 text-xs shrink-0 w-12 text-left">copy</button>
+    <span class="text-fade/35 text-xs w-40 shrink-0 hidden md:inline">{{.What}}</span>
   </div>
   {{end}}
 </div>
-<p class="text-zinc-700 text-xs mt-3">v1 observes; the terminal acts. Buttons arrive with the control-dir protocol.</p>
+{{end}}
 {{end}}

@@ -5,24 +5,31 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{block "title" .}}ply{{end}}</title>
 <link rel="stylesheet" href="/assets/app.css">
+<link rel="stylesheet" href="/assets/xterm.css">
 <script src="/assets/htmx.min.js" defer></script>
+<script src="/assets/xterm.js"></script>
+<script src="/assets/addon-fit.js"></script>
 </head>
-<body class="bg-zinc-950 text-zinc-300 font-mono text-sm min-h-screen">
-<div class="max-w-5xl mx-auto px-4 py-6">
-  <header class="flex items-baseline justify-between border-b border-zinc-800 pb-3 mb-6">
-    <div class="flex items-baseline gap-3">
-      <a href="/" class="text-zinc-100 font-bold tracking-tight">ply<span class="text-green-400">▮</span></a>
-      <a href="/deploy" class="text-zinc-500 hover:text-zinc-200 text-xs">deploy</a>
-      <span class="text-zinc-600 text-xs">{{block "crumb" .}}dashboard{{end}}</span>
+<body class="bg-ground text-ink/80 font-mono text-sm min-h-screen">
+<div id="page" class="max-w-5xl mx-auto px-4 py-6">
+  <header class="flex items-center justify-between border-b border-edge pb-3 mb-6">
+    <div class="flex items-center gap-4">
+      <a href="/" class="text-ink font-bold tracking-tight">ply<span class="text-accent">▮</span></a>
+      <nav class="flex items-center gap-1 text-xs">
+        <a href="/" class="px-2 py-1 rounded {{if eq .Section "apps"}}bg-card text-ink{{else}}text-fade/70 hover:text-ink{{end}}">apps</a>
+        <a href="/deploy" class="px-2 py-1 rounded {{if eq .Section "deploy"}}bg-card text-ink{{else}}text-fade/70 hover:text-ink{{end}}">deploy</a>
+      </nav>
+      {{block "crumb" .}}{{end}}
     </div>
-    {{if .Authed}}<form method="post" action="/logout"><button class="text-zinc-600 hover:text-zinc-300 text-xs">logout</button></form>{{end}}
+    {{if .Authed}}<form method="post" action="/logout"><button class="text-fade/50 hover:text-ink text-xs">logout</button></form>{{end}}
   </header>
   {{block "content" .}}{{end}}
-  <footer class="mt-10 pt-3 border-t border-zinc-900 text-zinc-700 text-xs flex justify-between">
+  <footer class="mt-10 pt-3 border-t border-edge/60 text-fade/35 text-xs flex justify-between">
     <span>everything is a file</span>
     <span>{{.Version}}</span>
   </footer>
 </div>
+<div id="drawer"></div>
 <script>
 function copyCmd(btn){
   navigator.clipboard.writeText(btn.dataset.cmd).then(()=>{
@@ -42,6 +49,22 @@ document.addEventListener('htmx:afterSwap', e => {
 });
 document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('pre[data-logs]').forEach(p => p.scrollTop = p.scrollHeight);
+  const saved = localStorage.getItem('drawerW');
+  if (saved) document.documentElement.style.setProperty('--drawer-w', saved);
+});
+// drag the drawer's left edge to resize; the page margin follows via CSS
+document.addEventListener('mousedown', e => {
+  if (!e.target.closest('[data-drawer-resize]')) return;
+  e.preventDefault();
+  const move = ev => {
+    const w = Math.min(Math.max(window.innerWidth - ev.clientX, 320), window.innerWidth * 0.9);
+    document.documentElement.style.setProperty('--drawer-w', w + 'px');
+  };
+  const up = () => {
+    removeEventListener('mousemove', move); removeEventListener('mouseup', up);
+    localStorage.setItem('drawerW', document.documentElement.style.getPropertyValue('--drawer-w'));
+  };
+  addEventListener('mousemove', move); addEventListener('mouseup', up);
 });
 </script>
 </body>

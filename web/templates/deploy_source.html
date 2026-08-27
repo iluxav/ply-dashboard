@@ -3,13 +3,13 @@
   <form hx-post="/deploy/inspect" hx-target="#source-wizard" hx-swap="outerHTML" class="flex flex-wrap gap-2 text-xs">
     <input name="repo" value="{{with .Source}}{{.RepoURL}}{{end}}"
            placeholder="https://github.com/org/repo — public or private"
-           class="flex-1 min-w-64 bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100">
+           class="flex-1 min-w-64 bg-card border border-edge rounded px-2 py-1.5 text-ink">
     <input name="token" type="password" value="{{with .Source}}{{.Token}}{{end}}"
            placeholder="token (private repos only)" autocomplete="off"
-           class="w-56 bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100">
-    <button class="bg-zinc-100 text-zinc-950 rounded px-4 py-1.5 font-bold hover:bg-white">inspect</button>
+           class="w-56 bg-card border border-edge rounded px-2 py-1.5 text-ink">
+    <button class="bg-accent text-ground rounded px-4 py-1.5 font-bold hover:bg-accent-bright">inspect</button>
   </form>
-  <div class="text-zinc-700 text-xs mt-1">private repos: a fine-grained PAT with Contents: read on that one repo — one credential for cloning, images and update checks</div>
+  <div class="text-fade/35 text-xs mt-1">private repos: a fine-grained PAT with Contents: read on that one repo — one credential for cloning, images and update checks</div>
 
 {{with .Source}}
   {{with .Error}}<div class="text-red-400 text-xs mt-3 border border-red-900/60 rounded px-3 py-2">{{.}}</div>{{end}}
@@ -17,13 +17,13 @@
 
   <div class="mt-3 text-xs">
     {{if .Insp.Markers}}
-      <span class="text-zinc-600">detected:</span>
-      {{range .Insp.Markers}}<span class="text-zinc-400 border border-zinc-800 rounded px-1.5 py-0.5 mr-1">{{.}}</span>{{end}}
+      <span class="text-fade/50">detected:</span>
+      {{range .Insp.Markers}}<span class="text-fade border border-edge rounded px-1.5 py-0.5 mr-1">{{.}}</span>{{end}}
     {{end}}
     {{with .Insp.Release}}
       <span class="text-green-500/80 border border-green-900/60 rounded px-1.5 py-0.5 mr-1">release v{{.Version}} · {{.Asset}} image</span>
     {{end}}
-    {{with .Insp.Note}}<div class="text-amber-400/90 mt-2">{{.}}</div>{{end}}
+    {{with .Insp.Note}}<div class="text-accent/90 mt-2">{{.}}</div>{{end}}
   </div>
 
   <form class="mt-3 grid gap-2 text-xs md:grid-cols-2"
@@ -34,13 +34,13 @@
     <input type="hidden" name="token" value="{{.Token}}">
 
     <fieldset class="md:col-span-2 flex gap-4 items-baseline">
-      <span class="text-zinc-600">how to deploy:</span>
-      <label class="flex items-center gap-1.5 {{if not .Insp.Release}}text-zinc-600{{else}}text-zinc-300{{end}}">
+      <span class="text-fade/50">how to deploy:</span>
+      <label class="flex items-center gap-1.5 {{if not .Insp.Release}}text-fade/50{{else}}text-ink/80{{end}}">
         <input type="radio" name="lane" value="release" {{if eq .Lane "release"}}checked{{end}}
                hx-post="/deploy/inspect" hx-include="closest form" hx-target="#source-wizard" hx-swap="outerHTML">
         pull CI image from releases{{if .Insp.Release}} <span class="text-green-500/80">(recommended)</span>{{end}}
       </label>
-      <label class="flex items-center gap-1.5 text-zinc-300">
+      <label class="flex items-center gap-1.5 text-ink/80">
         <input type="radio" name="lane" value="source" {{if eq .Lane "source"}}checked{{end}}
                hx-post="/deploy/inspect" hx-include="closest form" hx-target="#source-wizard" hx-swap="outerHTML">
         build from source on this host
@@ -49,92 +49,92 @@
 
     {{if eq .Lane "release"}}
     <label class="grid gap-1">
-      <span class="text-zinc-600">deployment name</span>
-      <input name="name" value="{{.Gh.Name}}" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100">
+      <span class="text-fade/50">deployment name</span>
+      <input name="name" value="{{.Gh.Name}}" class="bg-card border border-edge rounded px-2 py-1.5 text-ink">
     </label>
     <label class="grid gap-1">
-      <span class="text-zinc-600">image name in the release asset</span>
-      <input name="gh_asset" value="{{.Gh.Asset}}" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100 font-mono">
+      <span class="text-fade/50">image name in the release asset</span>
+      <input name="gh_asset" value="{{.Gh.Asset}}" class="bg-card border border-edge rounded px-2 py-1.5 text-ink font-mono">
     </label>
     <label class="grid gap-1">
-      <span class="text-zinc-600">version <span class="text-zinc-700">(blank = follow the latest release)</span></span>
-      <input name="gh_version" value="{{.Gh.Version}}" placeholder="follow latest" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100">
+      <span class="text-fade/50">version <span class="text-fade/35">(blank = follow the latest release)</span></span>
+      <input name="gh_version" value="{{.Gh.Version}}" placeholder="follow latest" class="bg-card border border-edge rounded px-2 py-1.5 text-ink">
     </label>
     <label class="grid gap-1">
-      <span class="text-zinc-600">publish (ADDR:PORT)</span>
-      <input name="publish" value="{{.Gh.Publish}}" placeholder="internal:8080" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100">
+      <span class="text-fade/50">publish (ADDR:PORT)</span>
+      <input name="publish" value="{{.Gh.Publish}}" placeholder="internal:8080" class="bg-card border border-edge rounded px-2 py-1.5 text-ink">
     </label>
     <label class="grid gap-1">
-      <span class="text-zinc-600">domain <span class="text-zinc-700">(optional, via the edge)</span></span>
-      <input name="domain" value="{{.Gh.Domain}}" placeholder="app.example.com" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100">
+      <span class="text-fade/50">domain <span class="text-fade/35">(optional, via the edge)</span></span>
+      <input name="domain" value="{{.Gh.Domain}}" placeholder="app.example.com" class="bg-card border border-edge rounded px-2 py-1.5 text-ink">
     </label>
     <label class="grid gap-1">
-      <span class="text-zinc-600">env (KEY=VALUE per line)</span>
-      <textarea name="env" rows="2" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100 font-mono">{{.Gh.Env}}</textarea>
+      <span class="text-fade/50">env (KEY=VALUE per line)</span>
+      <textarea name="env" rows="2" class="bg-card border border-edge rounded px-2 py-1.5 text-ink font-mono">{{.Gh.Env}}</textarea>
     </label>
 
     {{else}}
     <label class="grid gap-1">
-      <span class="text-zinc-600">deployment name</span>
-      <input name="name" value="{{.Spec.Name}}" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100">
+      <span class="text-fade/50">deployment name</span>
+      <input name="name" value="{{.Spec.Name}}" class="bg-card border border-edge rounded px-2 py-1.5 text-ink">
     </label>
     <label class="grid gap-1">
-      <span class="text-zinc-600">preset <span class="text-zinc-700">(refills build/run fields)</span></span>
+      <span class="text-fade/50">preset <span class="text-fade/35">(refills build/run fields)</span></span>
       <select name="framework" hx-post="/deploy/inspect" hx-include="closest form" hx-target="#source-wizard" hx-swap="outerHTML"
-              class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100">
+              class="bg-card border border-edge rounded px-2 py-1.5 text-ink">
         {{$f := .Framework}}{{range .Frameworks}}<option {{if eq . $f}}selected{{end}}>{{.}}</option>{{end}}
       </select>
     </label>
     <label class="grid gap-1">
-      <span class="text-zinc-600">branch / ref <span class="text-zinc-700">(blank = remote HEAD)</span></span>
-      <input name="ref" value="{{.Spec.Ref}}" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100">
+      <span class="text-fade/50">branch / ref <span class="text-fade/35">(blank = remote HEAD)</span></span>
+      <input name="ref" value="{{.Spec.Ref}}" class="bg-card border border-edge rounded px-2 py-1.5 text-ink">
     </label>
     <label class="grid gap-1">
-      <span class="text-zinc-600">runtime keg <span class="text-zinc-700">(builder toolchain)</span></span>
-      <input name="runtime" value="{{.Spec.Runtime}}" placeholder="node@24" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100">
+      <span class="text-fade/50">runtime keg <span class="text-fade/35">(builder toolchain)</span></span>
+      <input name="runtime" value="{{.Spec.Runtime}}" placeholder="node@24" class="bg-card border border-edge rounded px-2 py-1.5 text-ink">
     </label>
     <label class="grid gap-1 md:col-span-2">
-      <span class="text-zinc-600">build command <span class="text-zinc-700">(runs memory-fenced in a throwaway builder)</span></span>
-      <textarea name="build" rows="2" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100 font-mono">{{.Spec.Build}}</textarea>
+      <span class="text-fade/50">build command <span class="text-fade/35">(runs memory-fenced in a throwaway builder)</span></span>
+      <textarea name="build" rows="2" class="bg-card border border-edge rounded px-2 py-1.5 text-ink font-mono">{{.Spec.Build}}</textarea>
     </label>
     <label class="grid gap-1">
-      <span class="text-zinc-600">entrypoint <span class="text-zinc-700">(needed unless the repo has a ply.toml)</span></span>
-      <input name="entrypoint" value="{{.Spec.Entrypoint}}" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100 font-mono">
+      <span class="text-fade/50">entrypoint <span class="text-fade/35">(needed unless the repo has a ply.toml)</span></span>
+      <input name="entrypoint" value="{{.Spec.Entrypoint}}" class="bg-card border border-edge rounded px-2 py-1.5 text-ink font-mono">
     </label>
     <label class="grid gap-1">
-      <span class="text-zinc-600">include <span class="text-zinc-700">(comma-separated paths packed into the image)</span></span>
-      <input name="include" value="{{.Spec.Include}}" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100 font-mono">
+      <span class="text-fade/50">include <span class="text-fade/35">(comma-separated paths packed into the image)</span></span>
+      <input name="include" value="{{.Spec.Include}}" class="bg-card border border-edge rounded px-2 py-1.5 text-ink font-mono">
     </label>
     <label class="grid gap-1">
-      <span class="text-zinc-600">port</span>
-      <input name="port" value="{{.Spec.Port}}" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100">
+      <span class="text-fade/50">port</span>
+      <input name="port" value="{{.Spec.Port}}" class="bg-card border border-edge rounded px-2 py-1.5 text-ink">
     </label>
     <label class="grid gap-1">
-      <span class="text-zinc-600">publish (ADDR:PORT)</span>
-      <input name="publish" value="{{.Spec.Publish}}" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100">
+      <span class="text-fade/50">publish (ADDR:PORT)</span>
+      <input name="publish" value="{{.Spec.Publish}}" class="bg-card border border-edge rounded px-2 py-1.5 text-ink">
     </label>
     <label class="grid gap-1">
-      <span class="text-zinc-600">domain <span class="text-zinc-700">(optional, via the edge)</span></span>
-      <input name="domain" value="{{.Spec.Domain}}" placeholder="app.example.com" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100">
+      <span class="text-fade/50">domain <span class="text-fade/35">(optional, via the edge)</span></span>
+      <input name="domain" value="{{.Spec.Domain}}" placeholder="app.example.com" class="bg-card border border-edge rounded px-2 py-1.5 text-ink">
     </label>
     <label class="grid gap-1">
-      <span class="text-zinc-600">env (KEY=VALUE per line)</span>
-      <textarea name="env" rows="2" class="bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-zinc-100 font-mono">{{.Spec.Env}}</textarea>
+      <span class="text-fade/50">env (KEY=VALUE per line)</span>
+      <textarea name="env" rows="2" class="bg-card border border-edge rounded px-2 py-1.5 text-ink font-mono">{{.Spec.Env}}</textarea>
     </label>
     {{end}}
 
     <div class="md:col-span-2">
-      <span class="text-zinc-600">the file that will be written — deployments/<span class="text-zinc-400">{{if eq .Lane "release"}}{{.Gh.Name}}{{else}}{{.Spec.Name}}{{end}}.toml</span>:</span>
+      <span class="text-fade/50">the file that will be written — deployments/<span class="text-fade">{{if eq .Lane "release"}}{{.Gh.Name}}{{else}}{{.Spec.Name}}{{end}}.toml</span>:</span>
       <div id="spec-preview" class="mt-1">
-        {{if .Preview}}<pre class="border border-zinc-800 rounded px-3 py-2 text-zinc-400 overflow-x-auto">{{.Preview}}</pre>
-        {{else}}<div class="text-zinc-700">fill the form — the preview appears here</div>{{end}}
+        {{if .Preview}}<pre class="border border-edge rounded px-3 py-2 text-fade overflow-x-auto">{{.Preview}}</pre>
+        {{else}}<div class="text-fade/35">fill the form — the preview appears here</div>{{end}}
       </div>
     </div>
 
     <div class="md:col-span-2">
       <button hx-post="/deploy/source" hx-target="#source-wizard" hx-swap="outerHTML" hx-include="closest form"
-              class="bg-zinc-100 text-zinc-950 rounded px-4 py-1.5 font-bold hover:bg-white">create deployment</button>
-      <span class="text-zinc-700 ml-3">{{if eq .Lane "release"}}`ply reconcile` downloads the release image and runs it{{else}}systemd notices the file, `ply reconcile` clones and builds on this host{{end}}</span>
+              class="bg-accent text-ground rounded px-4 py-1.5 font-bold hover:bg-accent-bright">create deployment</button>
+      <span class="text-fade/35 ml-3">{{if eq .Lane "release"}}`ply reconcile` downloads the release image and runs it{{else}}systemd notices the file, `ply reconcile` clones and builds on this host{{end}}</span>
     </div>
   </form>
   {{end}}

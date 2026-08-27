@@ -70,3 +70,13 @@ func Events(p Paths, app string, limit int) []Event {
 	}
 	return out
 }
+
+// LogTarget names the app whose log ring explains this event — failures
+// that happened inside a builder point at the builder's ring, which
+// outlives the builder itself (the post-mortem is a file).
+func (e Event) LogTarget() string {
+	if strings.Contains(e.Detail, e.App+"-builder") {
+		return e.App + "-builder"
+	}
+	return e.App
+}

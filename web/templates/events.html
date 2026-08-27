@@ -1,19 +1,21 @@
 {{define "events"}}
 {{if not .Events}}
-<div class="text-zinc-600 text-xs">no events yet — deploys, scales, restarts and crash respawns land here</div>
+<div class="text-fade/50 text-xs">no events yet — deploys, scales, restarts and crash respawns land here</div>
 {{else}}
 <div class="space-y-1 text-xs font-mono">
 {{range .Events}}
   <div class="flex items-baseline gap-3">
-    <span class="text-zinc-600 w-8 shrink-0 text-right">{{.Age}}</span>
+    <span class="text-fade/50 w-8 shrink-0 text-right">{{.Age}}</span>
     {{if eq .Event "deploy"}}<span class="text-green-500/80 w-28 shrink-0">deploy</span>
     {{else if eq .Event "deploy-failed"}}<span class="text-red-400 w-28 shrink-0">deploy-failed</span>
-    {{else if eq .Event "scale"}}<span class="text-sky-400/80 w-28 shrink-0">scale</span>
-    {{else if eq .Event "restart"}}<span class="text-amber-400/90 w-28 shrink-0">restart</span>
+    {{else if eq .Event "scale"}}<span class="text-fade/80 w-28 shrink-0">scale</span>
+    {{else if eq .Event "restart"}}<span class="text-accent/90 w-28 shrink-0">restart</span>
     {{else if eq .Event "instance-restart"}}<span class="text-red-400/80 w-28 shrink-0">crash-respawn</span>
-    {{else}}<span class="text-zinc-500 w-28 shrink-0">{{.Event}}</span>{{end}}
-    <a href="/app/{{.App}}" class="text-zinc-300 hover:underline shrink-0">{{.App}}</a>
-    <span class="text-zinc-500 truncate">{{.Detail}}</span>
+    {{else}}<span class="text-fade/70 w-28 shrink-0">{{.Event}}</span>{{end}}
+    <a href="/app/{{.App}}" class="text-ink/80 hover:underline shrink-0">{{.App}}</a>
+    <span class="text-fade/70 truncate">{{.Detail}}</span>
+    <button hx-get="/partials/logpane/{{.LogTarget}}" hx-target="#drawer" hx-swap="innerHTML"
+            class="text-fade/40 hover:text-accent shrink-0 ml-auto">logs</button>
   </div>
 {{end}}
 </div>

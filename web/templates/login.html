@@ -5,11 +5,11 @@
   {{with .Error}}<div class="text-red-400 text-xs mb-4 border border-red-900/60 rounded px-3 py-2">{{.}}</div>{{end}}
   <form method="post" action="/login" class="space-y-3">
     <input name="user" placeholder="username" autocomplete="username" autofocus
-           class="w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-zinc-600">
+           class="w-full bg-card border border-edge rounded px-3 py-2 text-ink placeholder-fade/40 focus:outline-none focus:border-accent">
     <input name="password" type="password" placeholder="password" autocomplete="current-password"
-           class="w-full bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-zinc-600">
-    <button class="w-full bg-zinc-100 text-zinc-950 rounded py-2 font-bold hover:bg-white">login</button>
+           class="w-full bg-card border border-edge rounded px-3 py-2 text-ink placeholder-fade/40 focus:outline-none focus:border-accent">
+    <button class="w-full bg-accent text-ground rounded py-2 font-bold hover:bg-accent-bright">login</button>
   </form>
-  <p class="text-zinc-700 text-xs mt-6">forgot? delete auth.json from the data volume — the filesystem is the admin API.</p>
+  <p class="text-fade/35 text-xs mt-6">forgot? delete auth.json from the data volume — the filesystem is the admin API.</p>
 </div>
 {{end}}

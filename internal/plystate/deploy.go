@@ -38,10 +38,15 @@ func DeploymentsAvailable(p Paths) bool {
 	if p.Deployments == "" || !grantMounted(p.Deployments) {
 		return false
 	}
-	if err := os.MkdirAll(p.Deployments, 0o755); err != nil {
+	// Probe inside .status/ — NOT the watched root: a probe file there
+	// fires the systemd.path watch, and "viewing the deploy page runs
+	// reconcile" is exactly the kind of spooky action this app must not
+	// have. Same mount, same writability answer, zero side effects.
+	dir := filepath.Join(p.Deployments, ".status")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return false
 	}
-	probe := filepath.Join(p.Deployments, ".probe")
+	probe := filepath.Join(dir, ".probe")
 	if err := os.WriteFile(probe, nil, 0o644); err != nil {
 		return false
 	}
@@ -75,6 +80,52 @@ func Deployments(p Paths) []Deployment {
 }
 
 var deployName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
+// OneDeployment reads a single deployment (spec + status) by name.
+func OneDeployment(p Paths, name string) (Deployment, bool) {
+	if !deployName.MatchString(name) {
+		return Deployment{}, false
+	}
+	raw, err := os.ReadFile(filepath.Join(p.Deployments, name+".toml"))
+	if err != nil {
+		return Deployment{}, false
+	}
+	d := Deployment{Name: name, Spec: string(raw)}
+	if st, err := os.ReadFile(filepath.Join(p.Deployments, ".status", name+".status")); err == nil {
+		var s DeployStatus
+		if json.Unmarshal(st, &s) == nil {
+			d.Status = &s
+		}
+	}
+	return d, true
+}
+
+// RewriteDeployment saves an edited spec verbatim. Validation is minimal
+// on purpose — the file is the truth and `ply reconcile` is the real
+// validator (its verdict lands in the status line); we only refuse specs
+// that could never mean anything.
+func RewriteDeployment(p Paths, name, spec string) error {
+	if !deployName.MatchString(name) {
+		return fmt.Errorf("bad deployment name")
+	}
+	if _, err := os.Stat(filepath.Join(p.Deployments, name+".toml")); err != nil {
+		return fmt.Errorf("deployment %q does not exist", name)
+	}
+	if strings.TrimSpace(spec) == "" {
+		return fmt.Errorf("empty spec — use delete if that's what you mean")
+	}
+	if !regexp.MustCompile(`(?m)^\s*(app|image|github|repo)\s*=`).MatchString(spec) {
+		return fmt.Errorf("spec needs one of app/image/github/repo — nothing to deploy otherwise")
+	}
+	if !strings.HasSuffix(spec, "\n") {
+		spec += "\n"
+	}
+	tmp := filepath.Join(p.Deployments, "."+name+".toml.tmp")
+	if err := os.WriteFile(tmp, []byte(spec), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, filepath.Join(p.Deployments, name+".toml"))
+}
 
 // renderEnv appends an [env] table from KEY=VALUE lines; blank values and
 // comments are dropped (unfilled form rows), first duplicate wins.

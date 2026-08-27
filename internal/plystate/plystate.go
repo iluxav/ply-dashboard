@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -326,4 +328,43 @@ func grantMounted(path string) bool {
 		return true // cannot tell; assume granted rather than dead-end
 	}
 	return sysInfo.Dev != sysParent.Dev
+}
+
+// logFile matches <app>.<n>.log — the ring naming scheme.
+var logFile = regexp.MustCompile(`^(.+)\.([0-9]+)\.log$`)
+
+// LogTailAll merges the log rings of every instance an app ever wrote —
+// discovered from the FILES, not from running state, so it works as a
+// post-mortem for apps (builders especially) that are already gone.
+func LogTailAll(p Paths, app string, limit int) []string {
+	entries, err := os.ReadDir(p.Logs)
+	if err != nil {
+		return nil
+	}
+	var ns []uint32
+	for _, e := range entries {
+		m := logFile.FindStringSubmatch(e.Name())
+		if m == nil || m[1] != app {
+			continue
+		}
+		if n, err := strconv.ParseUint(m[2], 10, 32); err == nil {
+			ns = append(ns, uint32(n))
+		}
+	}
+	sort.Slice(ns, func(a, b int) bool { return ns[a] < ns[b] })
+	prefix := len(ns) > 1
+	var out []string
+	for _, n := range ns {
+		for _, line := range LogTail(p, app, n, limit) {
+			if prefix {
+				out = append(out, fmt.Sprintf("%s.%d | %s", app, n, line))
+			} else {
+				out = append(out, line)
+			}
+		}
+	}
+	if len(out) > limit {
+		out = out[len(out)-limit:]
+	}
+	return out
 }

@@ -1,12 +1,12 @@
 {{define "apps_table"}}
 {{if not .Apps}}
-<div class="text-zinc-600 py-12 text-center">
-  no running apps — <span class="text-zinc-400">ply run &lt;image&gt;</span> starts one
+<div class="text-fade/50 py-12 text-center">
+  no running apps — <span class="text-fade">ply run &lt;image&gt;</span> starts one
 </div>
 {{else}}
 <table class="w-full">
   <thead>
-    <tr class="text-zinc-600 text-left text-xs border-b border-zinc-800">
+    <tr class="text-fade/50 text-left text-xs border-b border-edge">
       <th class="py-1 pr-4 font-normal">app</th>
       <th class="py-1 pr-4 font-normal text-right">up</th>
       <th class="py-1 pr-4 font-normal text-right">restarts</th>
@@ -18,18 +18,22 @@
   </thead>
   <tbody>
   {{range .Apps}}
-    <tr class="border-b border-zinc-900 hover:bg-zinc-900/50">
+    <tr class="border-b border-edge/60 hover:bg-card/70">
       <td class="py-1.5 pr-4">
-        <span class="{{if eq .Health "ok"}}text-green-400{{else if eq .Health "degraded"}}text-amber-400{{else}}text-red-400{{end}}">●</span>
-        <a href="/app/{{.Name}}" class="text-zinc-100 hover:underline ml-1">{{.Name}}</a>
+        <span class="{{if eq .Health "ok"}}text-green-400{{else if eq .Health "degraded"}}text-accent{{else}}text-red-400{{end}}">●</span>
+        <a href="/app/{{.Name}}" class="{{if isBuilder .Name}}text-fade/70{{else}}text-ink{{end}} hover:underline ml-1">{{.Name}}</a>
+        {{if isBuilder .Name}}<span class="text-fade/50 border border-edge rounded px-1.5 ml-1 text-xs">builder</span>{{end}}
       </td>
       <td class="py-1.5 pr-4 text-right">{{.Live}}/{{len .Instances}}</td>
-      <td class="py-1.5 pr-4 text-right {{if gt .Restarts 0}}text-amber-400{{end}}">{{.Restarts}}</td>
-      <td class="py-1.5 pr-4 text-right text-zinc-500">{{(.Oldest).UptimeShort}}</td>
-      <td class="py-1.5 pr-4 text-zinc-500">{{(.Oldest).ImageVersion}}</td>
-      <td class="py-1.5 pr-4 text-zinc-500">{{with .PublishedAddr}}{{.}}{{else}}—{{end}}</td>
+      <td class="py-1.5 pr-4 text-right {{if gt .Restarts 0}}text-accent{{end}}">{{.Restarts}}</td>
+      <td class="py-1.5 pr-4 text-right text-fade/70">{{(.Oldest).UptimeShort}}</td>
+      <td class="py-1.5 pr-4 text-fade/70">
+        {{(.Oldest).ImageVersion}}
+        {{with freshOf .Name}}{{if .UpdateAvailable}}<span class="text-accent border border-deep rounded px-1.5 ml-1" title="newer: {{.Latest}}">update</span>{{end}}{{end}}
+      </td>
+      <td class="py-1.5 pr-4 text-fade/70">{{with .PublishedAddr}}{{.}}{{else}}—{{end}}</td>
       <td class="py-1.5">
-        {{range .Domains}}<a href="https://{{.}}" class="text-sky-400 hover:underline mr-2">{{.}}</a>{{else}}<span class="text-zinc-700">—</span>{{end}}
+        {{range .Domains}}<a href="https://{{.}}" class="text-fade hover:underline mr-2">{{.}}</a>{{else}}<span class="text-fade/35">—</span>{{end}}
       </td>
     </tr>
   {{end}}

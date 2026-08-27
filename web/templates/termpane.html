@@ -1,0 +1,47 @@
+{{define "termpane"}}
+<div class="fixed inset-y-0 right-0 bg-ground border-l border-edge z-50 flex flex-col shadow-2xl" style="width:min(var(--drawer-w, 52rem), 100vw)">
+  <div data-drawer-resize class="absolute inset-y-0 -left-1 w-2 cursor-col-resize hover:bg-accent/30"></div>
+  <div class="flex items-center justify-between px-4 py-3 border-b border-edge shrink-0">
+    <span class="text-accent/80 text-[10px] uppercase tracking-wider">terminal · {{.AppName}}.{{.Slot}}</span>
+    <div class="flex items-center gap-4 text-xs">
+      <span id="term-status" class="text-fade/50">connecting…</span>
+      <button onclick="document.getElementById('drawer').innerHTML=''" class="text-fade/50 hover:text-ink">✕ close</button>
+    </div>
+  </div>
+  <div class="flex-1 min-h-0 p-2" id="term-host"></div>
+</div>
+<script>
+(function () {
+  const host = document.getElementById('term-host');
+  const status = document.getElementById('term-status');
+  const term = new Terminal({
+    fontFamily: 'ui-monospace, SF Mono, Cascadia Mono, Menlo, Consolas, monospace',
+    fontSize: 13,
+    theme: { background: '#0e0a07', foreground: '#e7e9e5', cursor: '#ffbd81',
+             selectionBackground: '#5a3828', black: '#171310', brightBlack: '#5a3828' },
+  });
+  const fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open(host);
+  fit.fit();
+
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(proto + '://' + location.host + '/ws/term/{{.AppName}}/{{.Slot}}');
+  ws.binaryType = 'arraybuffer';
+  const sendResize = () => ws.readyState === 1 && ws.send(JSON.stringify({ cols: term.cols, rows: term.rows }));
+  ws.onopen = () => { status.textContent = 'connected'; status.classList.add('text-green-500/80'); sendResize(); term.focus(); };
+  ws.onmessage = e => term.write(new Uint8Array(e.data));
+  ws.onclose = e => { status.textContent = e.reason || 'disconnected'; status.classList.remove('text-green-500/80'); term.write('\r\n\x1b[2m[session closed]\x1b[0m\r\n'); };
+  term.onData(d => ws.readyState === 1 && ws.send(new TextEncoder().encode(d)));
+  term.onResize(sendResize);
+
+  // refit when the drawer is resized (the drag handle) or the window changes
+  new ResizeObserver(() => { fit.fit(); }).observe(host);
+
+  // tear the socket down when the pane is replaced or closed
+  new MutationObserver((_, obs) => {
+    if (!document.body.contains(host)) { ws.close(); obs.disconnect(); }
+  }).observe(document.getElementById('drawer'), { childList: true });
+})();
+</script>
+{{end}}

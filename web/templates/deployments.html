@@ -1,36 +1,48 @@
 {{define "deployments"}}
 {{if not .Deployments}}
-<div class="text-zinc-600 text-xs">none — deploy something above, or drop a .toml in the deployments dir over ssh</div>
+<div class="text-fade/50 text-xs">none — deploy something above, or drop a .toml in the deployments dir over ssh</div>
 {{else}}
 <div class="space-y-2">
 {{range .Deployments}}
-  <div class="border border-zinc-800 rounded px-3 py-2">
+  <div class="border border-edge rounded px-3 py-2">
     <div class="flex items-center gap-3">
-      <a href="/app/{{.Name}}" class="text-zinc-100 hover:underline">{{.Name}}</a>
+      <a href="/app/{{.Name}}" class="text-ink hover:underline">{{.Name}}</a>
       {{with .Status}}
         <span class="text-xs {{if .OK}}text-green-500/80{{else}}text-red-400{{end}}">{{.}}</span>
       {{else}}
-        <span class="text-xs text-zinc-600">waiting for reconcile…</span>
+        <span class="text-xs text-fade/50">waiting for reconcile…</span>
       {{end}}
       {{$fresh := freshOf .Name}}
       {{with $fresh}}
-        {{if .UpdateAvailable}}
-          <span class="text-amber-400 text-xs">update available: {{.Latest}}</span>
+        {{if .Building}}
+          <span class="text-accent text-xs animate-pulse">building…</span>
+        {{else if .UpdateAvailable}}
+          <span class="text-accent text-xs">update available: {{.Latest}}</span>
         {{else}}
-          <span class="text-zinc-700 text-xs">up to date</span>
+          <span class="text-fade/35 text-xs">up to date</span>
         {{end}}
       {{end}}
       {{if and $fresh $fresh.UpdateAvailable}}
       <form method="post" action="/deploy/{{.Name}}/now">
-        <button class="text-amber-400 hover:text-amber-300 text-xs border border-amber-900/60 rounded px-2 py-0.5">deploy now</button>
+        <button class="text-accent hover:text-accent-bright text-xs border border-deep rounded px-2 py-0.5">deploy now</button>
       </form>
       {{end}}
       <form method="post" action="/deploy/{{.Name}}/delete" class="ml-auto"
             onsubmit="return confirm('Delete deployment {{.Name}}? The app stops and its unit is removed (volumes kept).')">
-        <button class="text-zinc-600 hover:text-red-400 text-xs">delete</button>
+        <button class="text-fade/50 hover:text-red-400 text-xs">delete</button>
       </form>
     </div>
-    <pre class="text-zinc-600 text-xs mt-1 overflow-x-auto">{{.Spec}}</pre>
+    <details id="edit-{{.Name}}" hx-preserve="true" class="mt-1">
+      <summary class="text-fade/50 text-xs cursor-pointer hover:text-fade">spec — view / edit</summary>
+      <form method="post" action="/deploy/{{.Name}}/edit" class="mt-1">
+        <textarea name="spec" rows="8" spellcheck="false"
+                  class="w-full bg-card border border-edge rounded px-3 py-2 text-fade text-xs font-mono">{{.Spec}}</textarea>
+        <div class="mt-1">
+          <button class="text-ink/80 hover:text-white text-xs border border-steel-edge rounded px-3 py-1">save — reconcile applies it</button>
+          <span class="text-fade/35 text-xs ml-2">the file is the truth: env, domain, version, anything</span>
+        </div>
+      </form>
+    </details>
   </div>
 {{end}}
 </div>

@@ -76,3 +76,14 @@ func LastResult(p Paths, app string) *CommandResult {
 	}
 	return &r
 }
+
+// SubmitExec asks an app's run parent for a terminal into one slot; the
+// parent answers by serving a PTY at control/term-<nonce>.sock.
+func SubmitExec(p Paths, app string, slot uint32, nonce string) error {
+	return SubmitControl(p, app, "exec", fmt.Sprintf("%d %s", slot, nonce))
+}
+
+// TermSocket is where that PTY will appear.
+func TermSocket(p Paths, app, nonce string) string {
+	return filepath.Join(controlDir(p, app), "term-"+nonce+".sock")
+}

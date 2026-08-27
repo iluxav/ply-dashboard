@@ -315,3 +315,29 @@ func TestWriteToken(t *testing.T) {
 		t.Errorf("token file: %v mode %v", err, info.Mode().Perm())
 	}
 }
+
+func TestOneDeploymentAndRewrite(t *testing.T) {
+	w := newMockWorld(t.TempDir())
+	d, ok := OneDeployment(w.p, "redis")
+	if !ok || d.Status == nil || !strings.Contains(d.Spec, `app = "redis"`) {
+		t.Fatalf("OneDeployment redis: ok=%v %+v", ok, d)
+	}
+	if _, ok := OneDeployment(w.p, "nope"); ok {
+		t.Error("missing deployment should not resolve")
+	}
+	if err := RewriteDeployment(w.p, "redis", "app = \"redis\"\nversion = \"8.1\"\n"); err != nil {
+		t.Fatalf("rewrite: %v", err)
+	}
+	d, _ = OneDeployment(w.p, "redis")
+	if !strings.Contains(d.Spec, `version = "8.1"`) {
+		t.Error("edit not persisted")
+	}
+	for _, bad := range []string{"", "   ", "just = \"noise\"\n"} {
+		if err := RewriteDeployment(w.p, "redis", bad); err == nil {
+			t.Errorf("should reject %q", bad)
+		}
+	}
+	if err := RewriteDeployment(w.p, "ghost-app", "app = \"x\"\n"); err == nil {
+		t.Error("editing a nonexistent deployment should fail")
+	}
+}

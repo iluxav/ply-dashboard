@@ -6,7 +6,9 @@
 package main
 
 import (
+	"crypto/rand"
 	"embed"
+	"encoding/hex"
 	"fmt"
 	"html/template"
 	"io/fs"
@@ -25,6 +27,7 @@ import (
 	"github.com/iluxav/ply-dashboard/internal/github"
 	"github.com/iluxav/ply-dashboard/internal/plystate"
 	"github.com/iluxav/ply-dashboard/internal/registry"
+	"github.com/iluxav/ply-dashboard/internal/term"
 
 	// The debian-slim base ships no CA bundle; these are the Mozilla roots
 	// compiled into the binary, used only when the system pool is empty —
@@ -56,54 +59,70 @@ type server struct {
 type freshness struct {
 	paths  plystate.Paths
 	mu     sync.Mutex
-	byName map[string]*Freshness
+	byName map[string]*remoteTip
+	kicks  chan struct{}
+}
+
+// remoteTip is what the remote said, cached; the comparison against the
+// deployed state happens at render time, so the moment a deploy lands the
+// line flips without waiting for the next sweep.
+type remoteTip struct {
+	Kind   string // "version" | "commit"
+	Latest string
 }
 
 type Freshness struct {
 	Current         string
 	Latest          string
 	UpdateAvailable bool
+	Building        bool // reconcile reported an in-flight build
 }
 
 func newFreshness(p plystate.Paths) *freshness {
-	return &freshness{paths: p, byName: map[string]*Freshness{}}
+	return &freshness{paths: p, byName: map[string]*remoteTip{}, kicks: make(chan struct{}, 1)}
 }
 
 func (f *freshness) run() {
 	for {
 		f.sweep()
-		time.Sleep(2 * time.Minute)
+		select {
+		case <-time.After(2 * time.Minute):
+		case <-f.kicks:
+		}
+	}
+}
+
+// Kick asks for an immediate sweep — called when deployments change, so a
+// fresh row gets its line while the human is still looking at it.
+func (f *freshness) Kick() {
+	select {
+	case f.kicks <- struct{}{}:
+	default:
 	}
 }
 
 func (f *freshness) sweep() {
 	seen := map[string]bool{}
 	for _, d := range plystate.Deployments(f.paths) {
-		var fr *Freshness
+		var tip *remoteTip
 		switch {
 		case d.Field("github") != "":
 			latest, err := github.LatestRelease(d.Field("github"), f.secret(d))
 			if err != nil {
 				continue
 			}
-			cur := d.DeployedVersion()
-			fr = &Freshness{Current: cur, Latest: latest, UpdateAvailable: cur != "" && cur != latest}
+			tip = &remoteTip{Kind: "version", Latest: latest}
 		case strings.HasPrefix(d.Field("repo"), "http"):
 			sha, err := github.LsRemote(d.Field("repo"), d.Field("ref"), f.secret(d))
 			if err != nil {
 				continue
 			}
-			cur := d.DeployedCommit()
-			fr = &Freshness{
-				Current:         cur,
-				Latest:          sha[:7],
-				UpdateAvailable: cur != "" && !strings.HasPrefix(sha, cur),
-			}
+			tip = &remoteTip{Kind: "commit", Latest: sha}
 		default:
 			continue // registry/image lanes and ssh remotes: nothing to probe
 		}
 		f.mu.Lock()
-		f.byName[d.Name] = fr
+		f.byName[d.Name] = tip
 		seen[d.Name] = true
 		f.mu.Unlock()
 	}
@@ -137,8 +156,32 @@ func (f *freshness) secret(d plystate.Deployment) string {
 
 func (f *freshness) Of(name string) *Freshness {
 	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.byName[name]
+	tip := f.byName[name]
+	f.mu.Unlock()
+	if tip == nil {
+		return nil
+	}
+	d, ok := plystate.OneDeployment(f.paths, name)
+	if !ok || d.Status == nil {
+		return nil
+	}
+	building := strings.HasPrefix(d.Status.Detail, "building")
+	if tip.Kind == "commit" {
+		cur := d.DeployedCommit()
+		return &Freshness{
+			Current:         cur,
+			Latest:          tip.Latest[:7],
+			UpdateAvailable: !building && cur != "" && !strings.HasPrefix(tip.Latest, cur),
+			Building:        building,
+		}
+	}
+	cur := d.DeployedVersion()
+	return &Freshness{
+		Current:         cur,
+		Latest:          tip.Latest,
+		UpdateAvailable: !building && cur != "" && cur != tip.Latest,
+		Building:        building,
+	}
 }
 
 func main() {
@@ -199,7 +242,11 @@ func main() {
 	mux.HandleFunc("POST /deploy/{name}/delete", s.guard(s.deployDelete))
 	mux.HandleFunc("GET /partials/deployments", s.guard(s.deploymentsPartial))
 	mux.HandleFunc("GET /partials/events", s.guard(s.eventsPartial))
+	mux.HandleFunc("GET /partials/logpane/{name}", s.guard(s.logPane))
+	mux.HandleFunc("GET /partials/termpane/{name}/{n}", s.guard(s.termPane))
+	mux.HandleFunc("GET /ws/term/{name}/{n}", s.guard(s.termWS))
 	mux.HandleFunc("POST /deploy/{name}/now", s.guard(s.deployNow))
+	mux.HandleFunc("POST /deploy/{name}/edit", s.guard(s.deployEdit))
 	mux.HandleFunc("POST /deploy/inspect", s.guard(s.sourceInspect))
 	mux.HandleFunc("POST /deploy/preview", s.guard(s.sourcePreview))
 	mux.HandleFunc("POST /deploy/source", s.guard(s.sourceCreate))
@@ -215,6 +262,7 @@ func main() {
 func (s *server) parseTemplates() {
 	funcs := template.FuncMap{
 		"statsOf":        s.sampler.Stats,
+		"isBuilder":      func(name string) bool { return strings.HasSuffix(name, "-builder") },
 		"contract":       registry.Contract,
 		"defaultPublish": registry.DefaultPublish,
 		"freshOf":        s.fresh.Of,
@@ -236,12 +284,15 @@ func (s *server) parseTemplates() {
 		"deployments":   template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/deployments.html")),
 		"deploy_source": template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/deploy_source.html")),
 		"events":        template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/events.html")),
+		"logpane":       template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/logpane.html")),
+		"termpane":      template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/termpane.html")),
 	}
 }
 
 type pageData struct {
 	Authed  bool
 	Version string
+	Section string // which nav item this page lives under
 	Error   string
 
 	Apps       []plystate.App
@@ -249,6 +300,7 @@ type pageData struct {
 	App        plystate.App
 	Instances  []plystate.Instance
 	Commands   []command
+	Slot       uint32
 	LogLines   []string
 	Writable   bool
 	ScaleUp    int
@@ -280,8 +332,11 @@ type sourceForm struct {
 	Error      string
 }
 
+var pageSection = map[string]string{"index": "apps", "app": "apps", "deploy": "deploy"}
+
 func (s *server) render(w http.ResponseWriter, page, name string, data pageData) {
 	data.Version = version
+	data.Section = pageSection[page]
 	if err := s.pages[page].ExecuteTemplate(w, name, data); err != nil {
 		log.Printf("render %s: %v", page, err)
 	}
@@ -442,6 +497,72 @@ func (s *server) restartAction(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "instances", "instances", s.liveData(name, app))
 }
 
+var paneName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
+// logPane: the right drawer — an app's merged log rings, discovered from
+// files so it reads dead apps (builder post-mortems) as well as live ones.
+func (s *server) logPane(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if !paneName.MatchString(name) {
+		http.NotFound(w, r)
+		return
+	}
+	data := pageData{AppName: name, LogLines: plystate.LogTailAll(s.paths, name, 500)}
+	which := "logpane"
+	if r.URL.Query().Get("body") == "1" {
+		which = "logpane_body"
+	}
+	s.render(w, "logpane", which, data)
+}
+
+// termPane renders the drawer shell; its script opens the websocket.
+func (s *server) termPane(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	slot, err := strconv.ParseUint(r.PathValue("n"), 10, 32)
+	if !paneName.MatchString(name) || err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	s.render(w, "termpane", "termpane", pageData{AppName: name, Slot: uint32(slot)})
+}
+
+// termWS: ask the app's run parent for a PTY (control/exec), wait for its
+// socket, then bridge. The parent polls on a 2s cadence — the wait budget
+// is two beats plus margin.
+func (s *server) termWS(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	slot, err := strconv.ParseUint(r.PathValue("n"), 10, 32)
+	if !paneName.MatchString(name) || err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	nonce := make([]byte, 12)
+	if _, err := rand.Read(nonce); err != nil {
+		http.Error(w, "entropy", http.StatusInternalServerError)
+		return
+	}
+	hexNonce := hex.EncodeToString(nonce)
+	if err := plystate.SubmitExec(s.paths, name, uint32(slot), hexNonce); err != nil {
+		http.Error(w, "control dir not writable: "+err.Error(), http.StatusConflict)
+		return
+	}
+	socket := plystate.TermSocket(s.paths, name, hexNonce)
+	deadline := time.Now().Add(6 * time.Second)
+	for {
+		if _, err := os.Stat(socket); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			http.Error(w, "no answer from the app's supervisor — it may predate terminals (restart its unit after upgrading ply)", http.StatusGatewayTimeout)
+			return
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if err := term.Bridge(w, r, socket); err != nil {
+		log.Printf("terminal %s.%d: %v", name, slot, err)
+	}
+}
+
 func (s *server) logsPartial(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	app, ok := s.app(name)
@@ -487,6 +608,7 @@ func (s *server) deployCreate(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/deploy?err="+template.URLQueryEscaper(err.Error()), http.StatusSeeOther)
 		return
 	}
+	s.fresh.Kick()
 	http.Redirect(w, r, "/deploy", http.StatusSeeOther)
 }
 
@@ -495,6 +617,22 @@ func (s *server) deployNow(w http.ResponseWriter, r *http.Request) {
 	if err := plystate.TouchDeployment(s.paths, r.PathValue("name")); err != nil {
 		log.Printf("deploy now: %v", err)
 	}
+	back := r.Header.Get("Referer")
+	if back == "" {
+		back = "/deploy"
+	}
+	http.Redirect(w, r, back, http.StatusSeeOther)
+}
+
+// deployEdit saves the spec exactly as typed — the file is the truth, and
+// reconcile is the validator whose verdict lands in the status line.
+func (s *server) deployEdit(w http.ResponseWriter, r *http.Request) {
+	err := plystate.RewriteDeployment(s.paths, r.PathValue("name"), r.FormValue("spec"))
+	if err != nil {
+		http.Redirect(w, r, "/deploy?err="+template.URLQueryEscaper(err.Error()), http.StatusSeeOther)
+		return
+	}
+	s.fresh.Kick()
 	http.Redirect(w, r, "/deploy", http.StatusSeeOther)
 }
 
@@ -502,6 +640,7 @@ func (s *server) deployDelete(w http.ResponseWriter, r *http.Request) {
 	if err := plystate.DeleteDeployment(s.paths, r.PathValue("name")); err != nil {
 		log.Printf("delete deployment: %v", err)
 	}
+	s.fresh.Kick()
 	http.Redirect(w, r, "/deploy", http.StatusSeeOther)
 }
 
@@ -639,6 +778,7 @@ func (s *server) sourceCreate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	s.fresh.Kick()
 	w.Header().Set("HX-Redirect", "/deploy")
 }
 
