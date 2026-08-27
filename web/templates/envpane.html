@@ -1,0 +1,27 @@
+{{define "envpane"}}
+<div class="fixed inset-y-0 right-0 bg-ground border-l border-edge z-50 flex flex-col shadow-2xl" style="width:min(var(--drawer-w, 52rem), 100vw)">
+  <div data-drawer-resize class="absolute inset-y-0 -left-1 w-2 cursor-col-resize hover:bg-accent/30"></div>
+  <div class="flex items-center justify-between px-4 py-3 border-b border-edge shrink-0">
+    <span class="text-accent/80 text-[10px] uppercase tracking-wider">env · .env/{{.EnvName}}.env</span>
+    <button onclick="document.getElementById('drawer').innerHTML=''" class="text-fade/50 hover:text-ink text-xs">✕ close</button>
+  </div>
+  <form method="post" action="/env/save" class="flex-1 min-h-0 px-4 py-3 flex flex-col gap-2">
+    <input type="hidden" name="name" value="{{.EnvName}}">
+    <label class="flex items-center gap-1.5 text-fade/50 text-xs">
+      <input type="checkbox" onchange="this.closest('form').querySelector('textarea').style.filter = this.checked ? '' : 'blur(5px)'">
+      reveal values
+    </label>
+    <textarea name="content" rows="20" spellcheck="false" autocomplete="off" style="filter: blur(5px)"
+              class="flex-1 min-h-0 w-full bg-card border border-edge rounded px-3 py-2 text-fade text-xs font-mono">{{.EnvContent}}</textarea>
+    <div class="text-fade/35 text-xs">KEY=VALUE per line; # comments kept. Stored 0600 in the deployments dir — never in git.</div>
+    <div class="flex items-center gap-3 shrink-0 pb-1">
+      <button name="apply" value="0" class="text-ink/80 hover:text-white text-xs border border-edge rounded px-3 py-1.5">save</button>
+      {{if .EnvRefs}}
+      <button name="apply" value="1" class="bg-accent text-ground rounded px-3 py-1.5 text-xs font-bold hover:bg-accent-bright">save &amp; apply — restarts {{range $i, $r := .EnvRefs}}{{if $i}}, {{end}}{{$r}}{{end}}</button>
+      {{else}}
+      <span class="text-fade/35 text-xs">no spec references this file yet — pick it in a deploy form, or add <span class="text-fade">env_file = ".env/{{.EnvName}}.env"</span> to a spec</span>
+      {{end}}
+    </div>
+  </form>
+</div>
+{{end}}
