@@ -27,6 +27,9 @@ type DeployStatus struct {
 	TS     int64  `json:"ts"`
 }
 
+// Age: how long ago this status was written (the fleet banner shows it).
+func (s DeployStatus) Age() string { return age(s.TS) }
+
 func (s DeployStatus) String() string {
 	if s.OK {
 		return "ok: " + s.Detail
@@ -627,6 +630,21 @@ func History(p Paths, name string, limit int) []Event {
 
 // Fleet reads the sync state a fleet host's reconcile writes — nil on
 // hosts that don't follow a repo.
+// FleetRepo: the repo a dashboard-enrolled host follows, for display —
+// empty when enrollment lives in /etc/ply/fleet.toml (outside our grant).
+func FleetRepo(p Paths) string {
+	raw, err := os.ReadFile(filepath.Join(p.Deployments, ".fleet.toml"))
+	if err != nil {
+		return ""
+	}
+	m := regexp.MustCompile(`(?m)^repo\s*=\s*"([^"]+)"`).FindStringSubmatch(string(raw))
+	if m == nil {
+		return ""
+	}
+	short := strings.TrimPrefix(m[1], "https://github.com/")
+	return strings.TrimSuffix(short, ".git")
+}
+
 func Fleet(p Paths) *DeployStatus {
 	raw, err := os.ReadFile(filepath.Join(p.Deployments, ".status", "fleet.json"))
 	if err != nil {

@@ -21,8 +21,10 @@ type Event struct {
 }
 
 // Age renders `ply ps`-style relative time: 45s, 12m, 3h, 2d.
-func (e Event) Age() string {
-	d := time.Since(time.Unix(e.TS, 0)).Truncate(time.Second)
+func (e Event) Age() string { return age(e.TS) }
+
+func age(ts int64) string {
+	d := time.Since(time.Unix(ts, 0)).Truncate(time.Second)
 	switch {
 	case d < 0:
 		return "-"

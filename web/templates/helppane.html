@@ -1,0 +1,95 @@
+{{define "helppane"}}
+<div class="fixed inset-y-0 right-0 bg-ground border-l border-edge z-50 flex flex-col shadow-2xl" style="width:min(var(--drawer-w, 52rem), 100vw)">
+  <div data-drawer-resize class="absolute inset-y-0 -left-1 w-2 cursor-col-resize hover:bg-accent/30"></div>
+  <div class="flex items-center justify-between px-4 py-3 border-b border-edge shrink-0">
+    <span class="text-accent/80 text-[10px] uppercase tracking-wider">help · {{.HelpTopic}}</span>
+    <button onclick="document.getElementById('drawer').innerHTML=''" class="text-fade/50 hover:text-ink text-xs">✕ close</button>
+  </div>
+  <div class="flex-1 min-h-0 overflow-y-auto px-5 py-4 text-xs leading-6 text-fade space-y-3">
+
+  {{if eq .HelpTopic "fleet"}}
+    <p class="text-ink">This host follows a git repo.</p>
+    <p>Every reconcile beat (~1&nbsp;min) it pulls the repo and copies
+    <span class="text-ink">shared/*.toml</span> and
+    <span class="text-ink">hosts/&lt;this-host&gt;/*.toml</span> into the deployments
+    dir. <span class="text-ink">Git owns the specs it brought</span>: edit one on the
+    host (here, or over ssh) and the next sync puts it back — change fleet-managed
+    apps by committing to the repo. Deployments created on this page coexist;
+    the fleet never touches files it didn't introduce.</p>
+    <p>Removing a spec from the repo retires the app on the next beat. Sync failures
+    are fail-open: apps keep running on the last synced state.</p>
+    <p>The status line shows the last synced commit's age. Secrets never live in the
+    repo — specs reference env files (<span class="text-ink">.env/…</span>) that exist
+    only on the host, so the repo can be public.</p>
+    <p class="text-fade/50">docs: <span class="text-ink">plybox.sh/docs/deployments/#gitops-fleet</span></p>
+  {{end}}
+
+  {{if eq .HelpTopic "host"}}
+    <p class="text-ink">A deployment is a file.</p>
+    <p><span class="text-ink">/var/lib/ply/deployments/&lt;name&gt;.toml</span> names a
+    source (registry app, GitHub release, repo to build, or an image path) plus env,
+    ports, domains. systemd watches the dir; any change runs
+    <span class="text-ink">ply reconcile</span>, which makes reality match the files —
+    creating, rolling, or removing apps. Deleting the file stops the app and removes
+    its unit (volumes are kept).</p>
+    <p><span class="text-ink">update available</span> means the source moved (a new
+    release or commit). <span class="text-ink">deploy now</span> just touches the file
+    — a touch is explicit intent, so it works even for
+    <span class="text-ink">auto&nbsp;=&nbsp;false</span> apps. With the 1-minute timer,
+    updates also flow with no clicks at all.</p>
+    <p><span class="text-ink">roll back</span> pins a past version into the spec; the
+    write itself triggers the (health-gated) roll. Edit the pin out to resume
+    following latest. The expandable <span class="text-ink">spec — view / edit</span>
+    is the whole truth: whatever you save there is what reconcile applies, and its
+    verdict lands in the status line.</p>
+    <p class="text-fade/50">docs: <span class="text-ink">plybox.sh/docs/deployments/</span></p>
+  {{end}}
+
+  {{if eq .HelpTopic "source"}}
+    <p class="text-ink">Paste a repo, get a running app — no CI required.</p>
+    <p>Public repos are inspected: a GitHub release carrying a ply image recommends
+    the <span class="text-ink">pull CI image</span> lane (the host downloads what your
+    CI built); otherwise the <span class="text-ink">build here</span> lane clones and
+    builds on this host in a fenced, throwaway builder. A
+    <span class="text-ink">package.json</span> with next prefills a known-good preset;
+    a <span class="text-ink">ply.toml</span> in the repo always wins.</p>
+    <p>Private repos: paste a fine-grained PAT with
+    <span class="text-ink">Contents:&nbsp;read</span> on that one repo. The token is
+    stored on this host (0600) and covers cloning, release downloads, and update
+    checks — one credential for everything.</p>
+    <p>Pasting a <span class="text-ink">fleet repo</span> (it has
+    <span class="text-ink">hosts/&lt;name&gt;/</span> dirs) offers enrollment instead:
+    this host starts following the repo.</p>
+    <p class="text-fade/50">docs: <span class="text-ink">plybox.sh/docs/dashboard/</span></p>
+  {{end}}
+
+  {{if eq .HelpTopic "registry"}}
+    <p class="text-ink">One-click services from the ply registry.</p>
+    <p>Each card is a published package — postgres, redis, community apps. Deploying
+    writes a spec file naming the app; the image downloads pinned by hash, and the
+    env textarea is prefilled with the service's contract (the variables it actually
+    reads). <span class="text-ink">internal:&lt;port&gt;</span> publishes only to other
+    apps on this host's bridge; a domain routes public traffic through the edge.</p>
+    <p>Filter as you type; the version dropdown pins, and leaving it on the newest
+    keeps the app following releases.</p>
+    <p class="text-fade/50">docs: <span class="text-ink">plybox.sh/docs/registries/</span></p>
+  {{end}}
+
+  {{if eq .HelpTopic "env"}}
+    <p class="text-ink">References in specs, values on the host.</p>
+    <p>An env file lives at
+    <span class="text-ink">deployments/.env/&lt;name&gt;.env</span> (0600) and specs
+    point at it: <span class="text-ink">env_file&nbsp;=&nbsp;".env/&lt;name&gt;.env"</span>.
+    Several apps can share one file — a stack's database password is written once.
+    Because the spec carries only the path, fleet repos stay publishable.</p>
+    <p><span class="text-ink">save</span> writes the file;
+    <span class="text-ink">save&nbsp;&amp;&nbsp;apply</span> also touches every spec that
+    references it, so reconcile restarts those apps onto the new values. An app sees
+    every key in the file it references — split files if you want tighter scopes.</p>
+    <p>Deleting a file that a spec still references is refused.</p>
+    <p class="text-fade/50">docs: <span class="text-ink">plybox.sh/docs/deployments/#shared-env-files</span></p>
+  {{end}}
+
+  </div>
+</div>
+{{end}}

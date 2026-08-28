@@ -188,6 +188,10 @@ env_file = ".env/plybox.env"
 	for name, spec := range specs {
 		writeFile(filepath.Join(w.p.Deployments, name+".toml"), spec)
 	}
+	// fleet fixtures: the "on this host" tab's one-liner needs both the
+	// status and the enrollment file (for the repo name)
+	writeFile(filepath.Join(w.p.Deployments, ".fleet.toml"), "repo = \"https://github.com/iluxav/plybox-infra\"\nhost = \"mock-host\"\n")
+	w.writeFleetStatus()
 	// a managed env file (referenced by blog) and an external reference,
 	// so the env panel shows both rows
 	writeFile(filepath.Join(w.p.Deployments, ".env", "plybox.env"), "# shared site secrets\nPOSTGRES_PASSWORD=mock-not-real\nGITHUB_CLIENT_SECRET=mock-not-real\n")
@@ -477,6 +481,11 @@ func logLine(app string) string {
 }
 
 func stamp() string { return time.Now().Format("15:04:05") }
+
+func (w *mockWorld) writeFleetStatus() {
+	raw, _ := json.Marshal(DeployStatus{OK: true, Detail: "synced @ c0589b10fb1e — 3 managed, 0 changed, 0 removed", TS: time.Now().Unix() - 140})
+	writeFile(filepath.Join(w.p.Deployments, ".status", "fleet.json"), string(raw))
+}
 
 func writeFile(path, content string) {
 	_ = os.MkdirAll(filepath.Dir(path), 0o755)

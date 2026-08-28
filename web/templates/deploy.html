@@ -1,5 +1,10 @@
 {{define "title"}}ply · deploy{{end}}
 {{define "crumb"}}{{end}}
+
+{{define "helplink"}}<button hx-get="/partials/helppane/{{.}}" hx-target="#drawer" hx-swap="innerHTML"
+        title="what is this?"
+        class="text-fade/40 hover:text-accent border border-edge rounded-full w-4 h-4 inline-flex items-center justify-center text-[10px] leading-none align-middle">?</button>{{end}}
+
 {{define "content"}}
 {{if not .DeployAvailable}}
 <div class="text-fade/50 py-10 text-center text-xs">
@@ -9,20 +14,54 @@
 </div>
 {{else}}
 
+{{with .DeployErr}}<div class="text-red-400 text-xs mb-4 border border-red-900/60 rounded px-3 py-2">{{.}}</div>{{end}}
+
+<nav class="flex items-center gap-1 text-xs border-b border-edge mb-6">
+  <a href="/deploy" class="px-3 py-2 -mb-px border-b-2 {{if eq .Tab "host"}}border-accent text-ink{{else}}border-transparent text-fade/70 hover:text-ink{{end}}">on this host <span class="text-fade/40">({{.DeployCount}})</span></a>
+  <a href="/deploy?tab=new" class="px-3 py-2 -mb-px border-b-2 {{if eq .Tab "new"}}border-accent text-ink{{else}}border-transparent text-fade/70 hover:text-ink{{end}}">new deployment</a>
+  <a href="/deploy?tab=env" class="px-3 py-2 -mb-px border-b-2 {{if eq .Tab "env"}}border-accent text-ink{{else}}border-transparent text-fade/70 hover:text-ink{{end}}">env files <span class="text-fade/40">({{len .EnvFiles}})</span></a>
+</nav>
+
+{{if eq .Tab "host"}}
 {{with .Fleet}}
-<div class="flex items-baseline gap-3 border {{if .OK}}border-edge{{else}}border-red-900/60{{end}} rounded px-3 py-2 mb-6 text-xs">
-  <span class="text-accent/80 text-[10px] uppercase tracking-wider">fleet</span>
-  <span class="{{if .OK}}text-fade/70{{else}}text-red-400{{end}}">{{if .OK}}synced {{.Detail}}{{else}}sync failing: {{.Detail}}{{end}}</span>
-  <span class="text-fade/35 ml-auto">git-managed specs converge every beat; files created here coexist</span>
+<div class="flex items-center gap-2 mb-4 text-xs">
+  {{if .OK}}
+    <span class="text-fade/60">fleet-managed{{with $.FleetRepo}} from <span class="text-fade">{{.}}</span>{{end}} · synced {{.Age}} ago</span>
+  {{else}}
+    <span class="text-red-400">fleet sync failing ({{.Age}} ago): {{.Detail}}</span>
+  {{end}}
+  {{template "helplink" "fleet"}}
 </div>
 {{end}}
-<h2 class="text-accent/80 text-[10px] uppercase tracking-wider mb-3">new deployment · from registry</h2>
+<div class="flex items-center gap-2 mb-3">
+  <h2 class="text-accent/80 text-[10px] uppercase tracking-wider">deployments on this host</h2>
+  {{template "helplink" "host"}}
+</div>
+<div hx-get="/partials/deployments" hx-trigger="every 3s" hx-swap="innerHTML">
+  {{template "deployments" .}}
+</div>
+{{end}}
+
+{{if eq .Tab "new"}}
+<div class="flex items-center gap-2 mb-3">
+  <h2 class="text-accent/80 text-[10px] uppercase tracking-wider">from source</h2>
+  {{template "helplink" "source"}}
+</div>
+<div class="text-fade/50 text-xs mb-3">paste a repo — the droplet clones and builds it, no CI needed; public repos are inspected for a preset</div>
+{{template "deploy_source" .}}
+
+<div class="flex items-center gap-2 mt-10 mb-3">
+  <h2 class="text-accent/80 text-[10px] uppercase tracking-wider">from registry</h2>
+  {{template "helplink" "registry"}}
+  <input id="registry-filter" type="search" placeholder="filter…" autocomplete="off"
+         oninput="const q=this.value.toLowerCase();document.querySelectorAll('[data-app-card]').forEach(c=>c.style.display=c.textContent.toLowerCase().includes(q)?'':'none')"
+         class="bg-card border border-edge rounded px-2 py-1 text-ink text-xs ml-auto w-56">
+</div>
 {{with .RegistryErr}}<div class="text-accent text-xs mb-3">registry unreachable: {{.}}</div>{{end}}
-{{with .DeployErr}}<div class="text-red-400 text-xs mb-3 border border-red-900/60 rounded px-3 py-2">{{.}}</div>{{end}}
 
 <div class="space-y-2">
 {{range .RegistryApps}}
-  <details class="border border-edge rounded">
+  <details data-app-card class="border border-edge rounded">
     <summary class="px-3 py-2 cursor-pointer hover:bg-card/70 flex items-baseline gap-3">
       <span class="text-ink">{{.Name}}</span>
       <span class="text-fade/50 text-xs">{{index .Versions 0}}</span>
@@ -54,7 +93,7 @@
       </label>
       {{if $.EnvFiles}}
       <label class="grid gap-1 md:col-span-2">
-        <span class="text-fade/50">shared env file (optional — managed below, values never enter the spec)</span>
+        <span class="text-fade/50">shared env file (optional — managed on the env files tab, values never enter the spec)</span>
         <select name="env_file" class="bg-card border border-edge rounded px-2 py-1.5 text-ink">
           <option value="">none</option>
           {{range $.EnvFiles}}{{if not .Missing}}<option>{{.Ref}}</option>{{end}}{{end}}
@@ -75,12 +114,13 @@
   <div class="text-fade/50 text-xs">no runnable apps in the registry catalog</div>
 {{end}}
 </div>
+{{end}}
 
-<h2 class="text-accent/80 text-[10px] uppercase tracking-wider mt-10 mb-3">new deployment · from source</h2>
-<div class="text-fade/50 text-xs mb-3">paste a repo — the droplet clones and builds it, no CI needed; public repos are inspected for a preset</div>
-{{template "deploy_source" .}}
-
-<h2 class="text-accent/80 text-[10px] uppercase tracking-wider mt-10 mb-3">shared env files</h2>
+{{if eq .Tab "env"}}
+<div class="flex items-center gap-2 mb-3">
+  <h2 class="text-accent/80 text-[10px] uppercase tracking-wider">shared env files</h2>
+  {{template "helplink" "env"}}
+</div>
 <div class="text-fade/50 text-xs mb-3">secrets live here on the host (<span class="text-fade">deployments/.env/</span>, 0600) — specs and the fleet repo carry only the reference</div>
 <div class="space-y-2">
 {{range .EnvFiles}}
@@ -117,10 +157,7 @@
     <button class="text-ink/80 hover:text-white border border-edge rounded px-3 py-1.5">new env file</button>
   </form>
 </div>
+{{end}}
 
-<h2 class="text-accent/80 text-[10px] uppercase tracking-wider mt-10 mb-3">deployments on this host</h2>
-<div hx-get="/partials/deployments" hx-trigger="every 3s" hx-swap="innerHTML">
-  {{template "deployments" .}}
-</div>
 {{end}}
 {{end}}

@@ -252,6 +252,7 @@ func main() {
 	mux.HandleFunc("POST /deploy/{name}/edit", s.guard(s.deployEdit))
 	mux.HandleFunc("POST /deploy/{name}/rollback", s.guard(s.deployRollback))
 	mux.HandleFunc("GET /partials/envpane/{name}", s.guard(s.envPane))
+	mux.HandleFunc("GET /partials/helppane/{topic}", s.guard(s.helpPane))
 	mux.HandleFunc("POST /env/create", s.guard(s.envCreate))
 	mux.HandleFunc("POST /env/save", s.guard(s.envSave))
 	mux.HandleFunc("POST /env/delete", s.guard(s.envDelete))
@@ -297,6 +298,7 @@ func (s *server) parseTemplates() {
 		"logpane":       template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/logpane.html")),
 		"termpane":      template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/termpane.html")),
 		"envpane":       template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/envpane.html")),
+		"helppane":      template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/helppane.html")),
 	}
 }
 
@@ -328,6 +330,10 @@ type pageData struct {
 	Source          *sourceForm
 	Events          []plystate.Event
 
+	Tab         string // deploy page: "host" | "new" | "env"
+	DeployCount int
+	FleetRepo   string
+	HelpTopic   string
 	EnvFiles    []plystate.EnvFile
 	EnvExternal []plystate.ExternalEnvRef
 	EnvName     string
@@ -593,16 +599,24 @@ func (s *server) logsPartial(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) deployPage(w http.ResponseWriter, r *http.Request) {
-	s.renderDeploy(w, r.URL.Query().Get("err"))
+	s.renderDeploy(w, r.URL.Query().Get("tab"), r.URL.Query().Get("err"))
 }
 
-func (s *server) renderDeploy(w http.ResponseWriter, deployErr string) {
+func (s *server) renderDeploy(w http.ResponseWriter, tab, deployErr string) {
+	if tab != "new" && tab != "env" {
+		tab = "host"
+	}
 	data := pageData{
 		Authed:          true,
+		Tab:             tab,
 		DeployAvailable: plystate.DeploymentsAvailable(s.paths),
 		Groups:          plystate.GroupDeployments(plystate.Deployments(s.paths)),
 		DeployErr:       deployErr,
 		Fleet:           plystate.Fleet(s.paths),
+		FleetRepo:       plystate.FleetRepo(s.paths),
+	}
+	for _, g := range data.Groups {
+		data.DeployCount += len(g.Items)
 	}
 	if data.DeployAvailable {
 		apps, err := s.registry.Apps()
@@ -613,6 +627,19 @@ func (s *server) renderDeploy(w http.ResponseWriter, deployErr string) {
 		data.EnvFiles, data.EnvExternal = plystate.EnvFiles(s.paths)
 	}
 	s.render(w, "deploy", "base.html", data)
+}
+
+// helpPane: the right drawer as a pocket manual — every deploy-page
+// section explains itself without leaving the page.
+var helpTopics = map[string]bool{"fleet": true, "host": true, "source": true, "registry": true, "env": true}
+
+func (s *server) helpPane(w http.ResponseWriter, r *http.Request) {
+	topic := r.PathValue("topic")
+	if !helpTopics[topic] {
+		http.NotFound(w, r)
+		return
+	}
+	s.render(w, "helppane", "helppane", pageData{HelpTopic: topic})
 }
 
 // --- shared env files --------------------------------------------------------
@@ -644,7 +671,7 @@ func (s *server) envCreate(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(r.FormValue("name"))
 	name = strings.TrimSuffix(name, ".env") // "plybox.env" means well
 	if _, err := plystate.ReadEnvFile(s.paths, name); err != nil {
-		http.Redirect(w, r, "/deploy?err="+template.URLQueryEscaper(err.Error()), http.StatusSeeOther)
+		http.Redirect(w, r, "/deploy?tab=env&err="+template.URLQueryEscaper(err.Error()), http.StatusSeeOther)
 		return
 	}
 	r.SetPathValue("name", name)
@@ -654,24 +681,24 @@ func (s *server) envCreate(w http.ResponseWriter, r *http.Request) {
 func (s *server) envSave(w http.ResponseWriter, r *http.Request) {
 	name := r.FormValue("name")
 	if err := plystate.WriteEnvFile(s.paths, name, r.FormValue("content")); err != nil {
-		http.Redirect(w, r, "/deploy?err="+template.URLQueryEscaper(err.Error()), http.StatusSeeOther)
+		http.Redirect(w, r, "/deploy?tab=env&err="+template.URLQueryEscaper(err.Error()), http.StatusSeeOther)
 		return
 	}
 	if r.FormValue("apply") == "1" {
 		if _, err := plystate.TouchEnvRefs(s.paths, name); err != nil {
-			http.Redirect(w, r, "/deploy?err="+template.URLQueryEscaper(err.Error()), http.StatusSeeOther)
+			http.Redirect(w, r, "/deploy?tab=env&err="+template.URLQueryEscaper(err.Error()), http.StatusSeeOther)
 			return
 		}
 	}
-	http.Redirect(w, r, "/deploy", http.StatusSeeOther)
+	http.Redirect(w, r, "/deploy?tab=env", http.StatusSeeOther)
 }
 
 func (s *server) envDelete(w http.ResponseWriter, r *http.Request) {
 	if err := plystate.DeleteEnvFile(s.paths, r.FormValue("name")); err != nil {
-		http.Redirect(w, r, "/deploy?err="+template.URLQueryEscaper(err.Error()), http.StatusSeeOther)
+		http.Redirect(w, r, "/deploy?tab=env&err="+template.URLQueryEscaper(err.Error()), http.StatusSeeOther)
 		return
 	}
-	http.Redirect(w, r, "/deploy", http.StatusSeeOther)
+	http.Redirect(w, r, "/deploy?tab=env", http.StatusSeeOther)
 }
 
 func (s *server) deployCreate(w http.ResponseWriter, r *http.Request) {
@@ -687,7 +714,7 @@ func (s *server) deployCreate(w http.ResponseWriter, r *http.Request) {
 		r.FormValue("grant_links") == "1",
 	)
 	if err != nil {
-		http.Redirect(w, r, "/deploy?err="+template.URLQueryEscaper(err.Error()), http.StatusSeeOther)
+		http.Redirect(w, r, "/deploy?tab=new&err="+template.URLQueryEscaper(err.Error()), http.StatusSeeOther)
 		return
 	}
 	s.fresh.Kick()
