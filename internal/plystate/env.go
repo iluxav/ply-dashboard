@@ -104,6 +104,10 @@ func WriteEnvFile(p Paths, name, content string) error {
 	if err := os.MkdirAll(envDir(p), 0o700); err != nil {
 		return err
 	}
+	// textareas submit CRLF; a stray \r inside a value breaks whatever
+	// parses the file (an endpoint URL with \r cost us a morning)
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+	content = strings.ReplaceAll(content, "\r", "\n")
 	if content != "" && !strings.HasSuffix(content, "\n") {
 		content += "\n" // textarea paste loses the trailing newline
 	}
