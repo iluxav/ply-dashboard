@@ -18,10 +18,12 @@ import (
 )
 
 type StackView struct {
-	Name    string // [stack] name, or "" when unnamed
-	EnvFile string // [stack] env_file as written, or ""
-	Members []StackMember
-	Holes   []EnvHole // unique $VARs across member envs, declaration order
+	Name        string // [stack] name, or "" when unnamed
+	Version     string
+	Description string
+	EnvFile     string // [stack] env_file as written, or ""
+	Members     []StackMember
+	Holes       []EnvHole // unique $VARs across member envs, declaration order
 }
 
 type StackMember struct {
@@ -34,6 +36,10 @@ type StackMember struct {
 	Volume  []string
 	Scale   int
 }
+
+// CSV renderings for the form's editable fields.
+func (m StackMember) PublishCSV() string { return strings.Join(m.Publish, ", ") }
+func (m StackMember) DomainCSV() string  { return strings.Join(m.Domain, ", ") }
 
 // EnvHole: one $VAR the stack needs at launch; Value carries the current
 // content of the referenced env file when it already exists on this host.
@@ -58,8 +64,10 @@ func ParseStack(p Paths, text string) (*StackView, error) {
 	}
 	var doc struct {
 		Stack struct {
-			Name    string `toml:"name"`
-			EnvFile string `toml:"env_file"`
+			Name        string `toml:"name"`
+			Version     string `toml:"version"`
+			Description string `toml:"description"`
+			EnvFile     string `toml:"env_file"`
 		} `toml:"stack"`
 		App []struct {
 			Run     string   `toml:"run"`
@@ -78,7 +86,12 @@ func ParseStack(p Paths, text string) (*StackView, error) {
 	if len(doc.App) == 0 {
 		return nil, nil
 	}
-	view := &StackView{Name: doc.Stack.Name, EnvFile: doc.Stack.EnvFile}
+	view := &StackView{
+		Name:        doc.Stack.Name,
+		Version:     doc.Stack.Version,
+		Description: doc.Stack.Description,
+		EnvFile:     doc.Stack.EnvFile,
+	}
 	seen := map[string]bool{}
 	for _, a := range doc.App {
 		m := StackMember{
@@ -189,12 +202,20 @@ func parseEnvLines(text string) map[string]string {
 	return out
 }
 
-// DeployStack lands a pasted stack: merge the collected hole values into
-// the env file the stack references (creating deployments/.env/<name>.env
-// and injecting the reference when the stack names none), then write the
-// spec verbatim as a new deployment. Values only ever ADD or UPDATE keys —
-// an existing env file keeps keys the form didn't carry.
-func DeployStack(p Paths, name, spec string, values map[string]string) error {
+// MemberOverride: the form's editable per-member fields; nil slices mean
+// "not submitted", empty slices mean "cleared".
+type MemberOverride struct {
+	Publish []string
+	Domain  []string
+}
+
+// DeployStack lands the stack form: apply per-member publish/domain edits,
+// merge the collected hole values into the env file the stack references
+// (creating deployments/.env/<name>.env and wiring it in when the stack
+// names none), then write the deployment. The pasted text goes to disk
+// verbatim unless something was actually edited — then the file is a
+// canonical re-render of the parsed stack (comments don't survive that).
+func DeployStack(p Paths, name, spec string, values map[string]string, overrides map[int]MemberOverride) error {
 	if !deployName.MatchString(name) {
 		return fmt.Errorf("bad deployment name")
 	}
@@ -205,33 +226,84 @@ func DeployStack(p Paths, name, spec string, values map[string]string) error {
 	if view == nil {
 		return fmt.Errorf("that spec has no [[app]] blocks — paste it in the from-a-spec form instead")
 	}
-	if len(values) > 0 {
-		if view.EnvFile == "" {
-			view.EnvFile = ".env/" + name + ".env"
-			spec = injectEnvFile(spec, view.EnvFile)
+	rerender := false
+	for i := range view.Members {
+		ov, ok := overrides[i]
+		if !ok {
+			continue
 		}
-		path := view.envFilePath(p)
-		if err := mergeEnvFile(path, values); err != nil {
+		m := &view.Members[i]
+		if ov.Publish != nil && strings.Join(ov.Publish, ",") != strings.Join(m.Publish, ",") {
+			m.Publish = ov.Publish
+			rerender = true
+		}
+		if ov.Domain != nil && strings.Join(ov.Domain, ",") != strings.Join(m.Domain, ",") {
+			m.Domain = ov.Domain
+			rerender = true
+		}
+	}
+	if len(values) > 0 && view.EnvFile == "" {
+		view.EnvFile = ".env/" + name + ".env"
+		rerender = true
+	}
+	if rerender {
+		spec = view.Render()
+	}
+	if len(values) > 0 {
+		if err := mergeEnvFile(view.envFilePath(p), values); err != nil {
 			return err
 		}
 	}
 	return CreateRawDeployment(p, name, spec)
 }
 
-// injectEnvFile adds `env_file = "…"` to the [stack] section, creating the
-// section when the file has none. Text surgery on purpose: the pasted spec
-// must reach disk otherwise byte-identical.
-func injectEnvFile(spec, ref string) string {
-	line := fmt.Sprintf("env_file = %q\n", ref)
-	if i := strings.Index(spec, "[stack]"); i >= 0 {
-		nl := strings.Index(spec[i:], "\n")
-		if nl < 0 {
-			return spec + "\n" + line
-		}
-		at := i + nl + 1
-		return spec[:at] + line + spec[at:]
+// Render emits the canonical stack toml for this view. Used only when the
+// form actually edited something — untouched pastes reach disk verbatim.
+func (v *StackView) Render() string {
+	var b strings.Builder
+	b.WriteString("[stack]\n")
+	if v.Name != "" {
+		fmt.Fprintf(&b, "name = %q\n", v.Name)
 	}
-	return "[stack]\n" + line + "\n" + spec
+	if v.Version != "" {
+		fmt.Fprintf(&b, "version = %q\n", v.Version)
+	}
+	if v.Description != "" {
+		fmt.Fprintf(&b, "description = %q\n", v.Description)
+	}
+	if v.EnvFile != "" {
+		fmt.Fprintf(&b, "env_file = %q\n", v.EnvFile)
+	}
+	for _, m := range v.Members {
+		b.WriteString("\n[[app]]\n")
+		fmt.Fprintf(&b, "run = %q\n", m.Run)
+		if m.Name != "" {
+			fmt.Fprintf(&b, "name = %q\n", m.Name)
+		}
+		writeTomlList(&b, "e", m.E)
+		writeTomlList(&b, "publish", m.Publish)
+		writeTomlList(&b, "domain", m.Domain)
+		writeTomlList(&b, "after", m.After)
+		writeTomlList(&b, "volume", m.Volume)
+		if m.Scale > 0 {
+			fmt.Fprintf(&b, "scale = %d\n", m.Scale)
+		}
+	}
+	return b.String()
+}
+
+func writeTomlList(b *strings.Builder, key string, items []string) {
+	if len(items) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "%s = [", key)
+	for i, it := range items {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		fmt.Fprintf(b, "%q", it)
+	}
+	b.WriteString("]\n")
 }
 
 func mergeEnvFile(path string, values map[string]string) error {

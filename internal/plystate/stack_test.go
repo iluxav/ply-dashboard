@@ -61,7 +61,7 @@ func TestDeployStackWritesEnvAndSpec(t *testing.T) {
 	p := Paths{Deployments: dir}
 	// no env_file in the stack: one is created and wired in
 	spec := "[[app]]\nrun = \"postgres@17\"\ne = [\"POSTGRES_PASSWORD=$PW\"]\n"
-	err := DeployStack(p, "mystack", spec, map[string]string{"PW": "s3cret"})
+	err := DeployStack(p, "mystack", spec, map[string]string{"PW": "s3cret"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestDeployStackWritesEnvAndSpec(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(written), "env_file = \".env/mystack.env\"") {
-		t.Fatalf("env_file not injected:\n%s", written)
+		t.Fatalf("env_file not wired in:\n%s", written)
 	}
 	env, err := os.ReadFile(filepath.Join(dir, ".env", "mystack.env"))
 	if err != nil {
@@ -79,16 +79,45 @@ func TestDeployStackWritesEnvAndSpec(t *testing.T) {
 	if string(env) != "PW=s3cret\n" {
 		t.Fatalf("env file: %q", env)
 	}
-	// merge keeps existing keys
-	err = DeployStack(p, "mystack2", spec, nil)
+	err = DeployStack(p, "mystack2", spec, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// untouched paste reaches disk verbatim
+	verbatim, _ := os.ReadFile(filepath.Join(dir, "mystack2.toml"))
+	if string(verbatim) != spec {
+		t.Fatalf("expected verbatim spec, got:\n%s", verbatim)
+	}
 }
 
-func TestInjectEnvFileIntoExistingStackSection(t *testing.T) {
-	out := injectEnvFile("[stack]\nname = \"x\"\n\n[[app]]\nrun = \"redis@8\"\n", ".env/x.env")
-	if !strings.Contains(out, "[stack]\nenv_file = \".env/x.env\"\nname = \"x\"") {
-		t.Fatalf("inject: %q", out)
+func TestDeployStackAppliesMemberOverrides(t *testing.T) {
+	dir := t.TempDir()
+	p := Paths{Deployments: dir}
+	err := DeployStack(p, "plybox", plyboxStack, nil, map[int]MemberOverride{
+		1: {Domain: []string{"plybox.sh"}, Publish: []string{"internal:3000"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	written, _ := os.ReadFile(filepath.Join(dir, "plybox.toml"))
+	text := string(written)
+	if !strings.Contains(text, "domain = [\"plybox.sh\"]") {
+		t.Fatalf("domain override missing:\n%s", text)
+	}
+	// the re-render keeps everything else: env file ref, member wiring
+	if !strings.Contains(text, "env_file = \"/etc/ply/plybox.env\"") ||
+		!strings.Contains(text, "after = [\"plybox-db\"]") {
+		t.Fatalf("re-render lost fields:\n%s", text)
+	}
+	// unchanged values submitted back do NOT force a re-render
+	err = DeployStack(p, "plybox2", plyboxStack, nil, map[int]MemberOverride{
+		0: {Publish: []string{}, Domain: []string{}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	verbatim, _ := os.ReadFile(filepath.Join(dir, "plybox2.toml"))
+	if string(verbatim) != plyboxStack {
+		t.Fatalf("expected verbatim spec:\n%s", verbatim)
 	}
 }

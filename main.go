@@ -356,6 +356,7 @@ type sourceForm struct {
 	Spec       plystate.SourceSpec
 	Gh         plystate.GithubSpec
 	Stack      *plystate.StackView // parsed from the repo's stack.toml, if any
+	Mode       string              // "stack" | "single" — which form shows when both apply
 	Preview    string
 	Error      string
 }
@@ -768,21 +769,48 @@ func (s *server) deployEdit(w http.ResponseWriter, r *http.Request) {
 func (s *server) deployStackCreate(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(r.FormValue("name"))
 	values := map[string]string{}
+	overrides := map[int]plystate.MemberOverride{}
 	if err := r.ParseForm(); err == nil {
 		for key := range r.PostForm {
 			if k, ok := strings.CutPrefix(key, "var_"); ok {
 				if v := r.PostForm.Get(key); v != "" {
 					values[k] = v
 				}
+				continue
+			}
+			var i int
+			var field string
+			if n, _ := fmt.Sscanf(key, "m%d_%s", &i, &field); n == 2 {
+				ov := overrides[i]
+				list := splitCSV(r.PostForm.Get(key))
+				switch field {
+				case "publish":
+					ov.Publish = list
+				case "domain":
+					ov.Domain = list
+				}
+				overrides[i] = ov
 			}
 		}
 	}
-	if err := plystate.DeployStack(s.paths, name, r.FormValue("spec"), values); err != nil {
+	if err := plystate.DeployStack(s.paths, name, r.FormValue("spec"), values, overrides); err != nil {
 		http.Redirect(w, r, "/deploy?tab=new&err="+template.URLQueryEscaper(err.Error()), http.StatusSeeOther)
 		return
 	}
 	s.fresh.Kick()
 	http.Redirect(w, r, "/deploy", http.StatusSeeOther)
+}
+
+// splitCSV: "a, b" → ["a","b"]. Always non-nil: a submitted-but-empty
+// field means "cleared", a nil override means "not in the form".
+func splitCSV(s string) []string {
+	out := []string{}
+	for _, part := range strings.Split(s, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // deployRaw creates a deployment from a pasted spec — a single-app toml or
@@ -830,6 +858,14 @@ func (s *server) renderSource(w http.ResponseWriter, form *sourceForm) {
 			form.Stack = view
 		}
 	}
+	// A repo shipping a stack leads with it; an hx re-render from inside the
+	// single-app form (its hidden dmode field) keeps the user's choice.
+	if form.Mode == "" {
+		form.Mode = "single"
+		if form.Insp.StackToml != "" {
+			form.Mode = "stack"
+		}
+	}
 	s.render(w, "deploy_source", "deploy_source", pageData{Source: form})
 }
 
@@ -852,6 +888,9 @@ func (s *server) sourceInspect(w http.ResponseWriter, r *http.Request) {
 	}
 	form.Insp = insp
 	form.Inspected = true
+	if m := r.FormValue("dmode"); m == "stack" || m == "single" {
+		form.Mode = m
+	}
 
 	// the lane is a pre-answered question: releases with a ply image beat
 	// building on the droplet — but the radio lets you disagree
@@ -915,6 +954,7 @@ func (s *server) sourceCreate(w http.ResponseWriter, r *http.Request) {
 		Framework: r.FormValue("framework"),
 		Spec:      specFromForm(r),
 		Gh:        githubFromForm(r),
+		Mode:      r.FormValue("dmode"),
 	}
 	fail := func(err error) {
 		form.Error = err.Error()
