@@ -261,6 +261,7 @@ func main() {
 	mux.HandleFunc("POST /deploy/preview", s.guard(s.sourcePreview))
 	mux.HandleFunc("POST /deploy/source", s.guard(s.sourceCreate))
 	mux.HandleFunc("POST /deploy/raw", s.guard(s.deployRaw))
+	mux.HandleFunc("POST /deploy/stack", s.guard(s.deployStackCreate))
 
 	log.Printf("ply-dashboard %s — listening on :%s (state: %s)", version, port, paths.State)
 	log.Fatal(http.ListenAndServe(":"+port, mux))
@@ -354,6 +355,7 @@ type sourceForm struct {
 	Token      string
 	Spec       plystate.SourceSpec
 	Gh         plystate.GithubSpec
+	Stack      *plystate.StackView // parsed from the repo's stack.toml, if any
 	Preview    string
 	Error      string
 }
@@ -760,6 +762,29 @@ func (s *server) deployEdit(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/deploy", http.StatusSeeOther)
 }
 
+// deployStackCreate lands the inspected-stack form: the spec verbatim plus
+// one var_<KEY> field per $VAR hole, merged into the env file the stack
+// references before the deployment file is written.
+func (s *server) deployStackCreate(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimSpace(r.FormValue("name"))
+	values := map[string]string{}
+	if err := r.ParseForm(); err == nil {
+		for key := range r.PostForm {
+			if k, ok := strings.CutPrefix(key, "var_"); ok {
+				if v := r.PostForm.Get(key); v != "" {
+					values[k] = v
+				}
+			}
+		}
+	}
+	if err := plystate.DeployStack(s.paths, name, r.FormValue("spec"), values); err != nil {
+		http.Redirect(w, r, "/deploy?tab=new&err="+template.URLQueryEscaper(err.Error()), http.StatusSeeOther)
+		return
+	}
+	s.fresh.Kick()
+	http.Redirect(w, r, "/deploy", http.StatusSeeOther)
+}
+
 // deployRaw creates a deployment from a pasted spec — a single-app toml or
 // a whole [[app]] stack. Same philosophy as deployEdit: the file is the
 // truth, reconcile is the validator.
@@ -797,6 +822,14 @@ func (s *server) historyOf(name string) []plystate.Event {
 
 func (s *server) renderSource(w http.ResponseWriter, form *sourceForm) {
 	form.Frameworks = github.Frameworks()
+	// A repo shipping a stack.toml is telling us how it deploys: parse it
+	// into member cards + $VAR holes. A parse failure isn't fatal — the
+	// panel falls back to the raw text with the error shown.
+	if form.Insp.StackToml != "" && form.Stack == nil {
+		if view, err := plystate.ParseStack(s.paths, form.Insp.StackToml); err == nil {
+			form.Stack = view
+		}
+	}
 	s.render(w, "deploy_source", "deploy_source", pageData{Source: form})
 }
 

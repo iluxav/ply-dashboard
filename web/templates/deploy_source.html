@@ -44,6 +44,59 @@
     {{with .Insp.Note}}<div class="text-accent/90 mt-2">{{.}}</div>{{end}}
   </div>
 
+  {{if .Insp.StackToml}}
+  <div class="mt-3 border border-green-900/60 rounded">
+    <div class="px-3 py-2 text-xs text-green-500/80 border-b border-edge/60">
+      stack.toml detected — this repo deploys as a stack{{with .Insp.StackName}} ({{.}}){{end}}: every [[app]] member below lands as its own app, wired
+    </div>
+    <form method="post" action="/deploy/stack" class="px-3 py-3 grid gap-3 text-xs">
+      <label class="grid gap-1 md:w-64">
+        <span class="text-fade/50">deployment name</span>
+        <input name="name" value="{{.Insp.StackName}}" class="bg-card border border-edge rounded px-2 py-1.5 text-ink">
+      </label>
+
+      {{if .Stack}}
+      <div class="grid gap-2 md:grid-cols-2">
+        {{range .Stack.Members}}
+        <div class="border border-edge rounded px-3 py-2 grid gap-1">
+          <div class="text-ink">{{.Name}}{{if .After}} <span class="text-fade/40">after {{range .After}}{{.}} {{end}}</span>{{end}}</div>
+          <div class="text-fade/60 font-mono break-all">{{.Run}}</div>
+          {{if .Publish}}<div class="text-fade/50">publish: {{range .Publish}}<span class="font-mono">{{.}}</span> {{end}}</div>{{end}}
+          {{if .Domain}}<div class="text-fade/50">domain: {{range .Domain}}<span class="font-mono">{{.}}</span> {{end}}</div>{{end}}
+          {{if .E}}<div class="text-fade/40 font-mono">{{range .E}}{{.}}<br>{{end}}</div>{{end}}
+        </div>
+        {{end}}
+      </div>
+
+      {{if .Stack.Holes}}
+      <div class="grid gap-1">
+        <span class="text-fade/50">required values — the <span class="font-mono">$VARS</span> this stack fills at launch{{with .Stack.EnvFile}} (saved to <span class="font-mono">{{.}}</span>){{end}}{{if not .Stack.EnvFile}} (saved to <span class="font-mono">.env/&lt;name&gt;.env</span> and wired in){{end}}</span>
+        <div class="grid gap-2 md:grid-cols-2">
+          {{range .Stack.Holes}}
+          <label class="grid gap-1">
+            <span class="text-fade/50 font-mono">{{.Key}}</span>
+            <input name="var_{{.Key}}" value="{{.Value}}" autocomplete="off" class="bg-card border border-edge rounded px-2 py-1.5 text-ink font-mono">
+          </label>
+          {{end}}
+        </div>
+      </div>
+      {{end}}
+      {{end}}
+
+      <details>
+        <summary class="cursor-pointer text-fade/50 hover:text-ink">edit as text</summary>
+        <textarea name="spec" rows="14" class="mt-2 w-full bg-card border border-edge rounded px-2 py-1.5 text-ink font-mono">{{.Insp.StackToml}}</textarea>
+      </details>
+      {{if not .Stack}}<div class="text-accent/90">could not parse the stack — review it under “edit as text”; deploying still works if ply accepts it</div>{{end}}
+
+      <div>
+        <button class="bg-accent text-ground rounded px-4 py-1.5 font-bold hover:bg-accent-bright">deploy the stack</button>
+        <span class="text-fade/35 ml-3">writes deployments/&lt;name&gt;.toml — reconcile expands the members</span>
+      </div>
+    </form>
+  </div>
+  {{end}}
+
   <form class="mt-3 grid gap-2 text-xs md:grid-cols-2"
         hx-post="/deploy/preview" hx-trigger="input delay:400ms" hx-target="#spec-preview" hx-swap="innerHTML">
     <input type="hidden" name="inspected" value="1">
@@ -145,17 +198,6 @@
     </label>
     {{end}}
 
-    <fieldset class="md:col-span-2 flex gap-5 items-baseline text-fade/50">
-      <span>needs a database?</span>
-      <label class="flex items-center gap-1.5">
-        <input type="checkbox" name="svc_postgres" value="1">
-        + postgres <span class="text-fade/35">(creates &lt;name&gt;-db, wires POSTGRES_* into your app)</span>
-      </label>
-      <label class="flex items-center gap-1.5">
-        <input type="checkbox" name="svc_redis" value="1">
-        + redis <span class="text-fade/35">(creates &lt;name&gt;-cache)</span>
-      </label>
-    </fieldset>
 
     <label class="flex items-center gap-1.5 text-fade/50 md:col-span-2">
       <input type="checkbox" name="manual" value="1" {{if eq .Lane "release"}}{{if .Gh.Manual}}checked{{end}}{{else}}{{if .Spec.Manual}}checked{{end}}{{end}}>

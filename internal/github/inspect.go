@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -30,6 +31,8 @@ type Inspection struct {
 	Note          string   // one human sentence about what that means
 	Release       *Release // latest release carrying a .img for this arch, if any
 	FleetHosts    []string // hosts/<name>/ dirs — the repo is a fleet, not an app
+	StackToml     string   // repo's stack.toml content, if it carries one
+	StackName     string   // [stack] name from that file (repo name fallback)
 }
 
 // Release: the CI-image lane's offer — the latest release ships a ply
@@ -38,6 +41,9 @@ type Release struct {
 	Version string
 	Asset   string // app name parsed from <app>-<ver>-linux-<arch>.img
 }
+
+// [stack] name = "…" — the stack's own name, for the prefilled form.
+var stackName = regexp.MustCompile(`(?m)^\s*name\s*=\s*"([^"]+)"`)
 
 var repoPattern = regexp.MustCompile(
 	`^(?:https?://github\.com/|git@github\.com:|github\.com/)([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/?$`)
@@ -158,6 +164,17 @@ func (i *Inspection) probe(token string) {
 	if status, _ := raw("ply.toml"); status == http.StatusOK {
 		hasPly = true
 		i.Markers = append(i.Markers, "ply.toml")
+	}
+	// A repo shipping a stack.toml describes its whole deployment — the app
+	// plus the services it needs — so the page can offer the stack as one
+	// paste-ready unit instead of a single-app lane.
+	if status, body := raw("stack.toml"); status == http.StatusOK && strings.Contains(string(body), "[[app]]") {
+		i.StackToml = string(body)
+		i.StackName = strings.TrimSuffix(path.Base(i.Repo), ".git")
+		if m := stackName.FindStringSubmatch(i.StackToml); m != nil {
+			i.StackName = m[1]
+		}
+		i.Markers = append(i.Markers, "stack.toml")
 	}
 	var pkg struct {
 		Dependencies    map[string]string `json:"dependencies"`
