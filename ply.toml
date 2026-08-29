@@ -7,7 +7,7 @@
 
 [package]
 name = "dashboard"
-version = "0.1.25"
+version = "0.1.26"
 entrypoint = ["./ply-dashboard"]
 include = ["ply-dashboard"]
 base = "debian@13"
