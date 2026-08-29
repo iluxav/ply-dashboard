@@ -2,8 +2,6 @@ VERSION ?= 0.1.0
 
 .PHONY: build css run mock test img clean release
 
-# bump ply.toml, commit, tag, push — the tag ALWAYS matches the version, so
-# the workflow's guard can't bite. `make release V=0.2.0` overrides the bump.
 release:
 	@set -eu; \
 	test "$$(git rev-parse --abbrev-ref HEAD)" = main || { echo "release: not on main"; exit 1; }; \
