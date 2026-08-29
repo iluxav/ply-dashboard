@@ -114,6 +114,25 @@
   <div class="text-fade/50 text-xs">no runnable apps in the registry catalog</div>
 {{end}}
 </div>
+
+<div class="flex items-center gap-2 mt-10 mb-3">
+  <h2 class="text-accent/80 text-[10px] uppercase tracking-wider">from a spec</h2>
+</div>
+<div class="text-fade/50 text-xs mb-3">paste a deployment toml — a single app, or a whole <span class="text-fade">[[app]]</span> stack (reconcile expands it into one app per member; secrets stay in the env file the spec references)</div>
+<form method="post" action="/deploy/raw" class="grid gap-2 text-xs">
+  <label class="grid gap-1 md:w-64">
+    <span class="text-fade/50">deployment name</span>
+    <input name="name" placeholder="mystack" class="bg-card border border-edge rounded px-2 py-1.5 text-ink">
+  </label>
+  <label class="grid gap-1">
+    <span class="text-fade/50">spec</span>
+    <textarea name="spec" rows="12" placeholder='[stack]&#10;name = "mystack"&#10;env_file = "/etc/ply/mystack.env"&#10;&#10;[[app]]&#10;run  = "postgres@17"&#10;name = "mystack-db"&#10;e    = ["POSTGRES_PASSWORD=$PW"]&#10;&#10;[[app]]&#10;run     = "https://…/web-1.0.0-linux-x64.img"&#10;name    = "web"&#10;after   = ["mystack-db"]&#10;publish = ["internal:3000"]' class="bg-card border border-edge rounded px-2 py-1.5 text-ink font-mono"></textarea>
+  </label>
+  <div>
+    <button class="bg-accent text-ground rounded px-4 py-1.5 font-bold hover:bg-accent-bright">deploy — reconcile applies it</button>
+    <span class="text-fade/35 ml-3">writes /var/lib/ply/deployments/&lt;name&gt;.toml</span>
+  </div>
+</form>
 {{end}}
 
 {{if eq .Tab "env"}}

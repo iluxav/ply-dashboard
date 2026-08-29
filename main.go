@@ -260,6 +260,7 @@ func main() {
 	mux.HandleFunc("POST /deploy/enroll", s.guard(s.fleetEnroll))
 	mux.HandleFunc("POST /deploy/preview", s.guard(s.sourcePreview))
 	mux.HandleFunc("POST /deploy/source", s.guard(s.sourceCreate))
+	mux.HandleFunc("POST /deploy/raw", s.guard(s.deployRaw))
 
 	log.Printf("ply-dashboard %s — listening on :%s (state: %s)", version, port, paths.State)
 	log.Fatal(http.ListenAndServe(":"+port, mux))
@@ -753,6 +754,20 @@ func (s *server) deployEdit(w http.ResponseWriter, r *http.Request) {
 	err := plystate.RewriteDeployment(s.paths, r.PathValue("name"), r.FormValue("spec"))
 	if err != nil {
 		http.Redirect(w, r, "/deploy?err="+template.URLQueryEscaper(err.Error()), http.StatusSeeOther)
+		return
+	}
+	s.fresh.Kick()
+	http.Redirect(w, r, "/deploy", http.StatusSeeOther)
+}
+
+// deployRaw creates a deployment from a pasted spec — a single-app toml or
+// a whole [[app]] stack. Same philosophy as deployEdit: the file is the
+// truth, reconcile is the validator.
+func (s *server) deployRaw(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimSpace(r.FormValue("name"))
+	err := plystate.CreateRawDeployment(s.paths, name, r.FormValue("spec"))
+	if err != nil {
+		http.Redirect(w, r, "/deploy?tab=new&err="+template.URLQueryEscaper(err.Error()), http.StatusSeeOther)
 		return
 	}
 	s.fresh.Kick()

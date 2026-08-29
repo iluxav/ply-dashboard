@@ -117,9 +117,24 @@ func RewriteDeployment(p Paths, name, spec string) error {
 	if strings.TrimSpace(spec) == "" {
 		return fmt.Errorf("empty spec — use delete if that's what you mean")
 	}
-	if !regexp.MustCompile(`(?m)^\s*(app|image|github|repo)\s*=`).MatchString(spec) {
-		return fmt.Errorf("spec needs one of app/image/github/repo — nothing to deploy otherwise")
+	if err := checkSpecShape(spec); err != nil {
+		return err
 	}
+	return writeSpec(p, name, spec)
+}
+
+// A spec that could never converge: no source key and no [[app]] stack
+// blocks. Everything else is `ply reconcile`'s judgment call.
+var specShape = regexp.MustCompile(`(?m)^\s*(app|image|url|github|repo)\s*=|^\s*\[\[app\]\]`)
+
+func checkSpecShape(spec string) error {
+	if !specShape.MatchString(spec) {
+		return fmt.Errorf("spec needs one of app/image/url/github/repo, or [[app]] stack blocks — nothing to deploy otherwise")
+	}
+	return nil
+}
+
+func writeSpec(p Paths, name, spec string) error {
 	if !strings.HasSuffix(spec, "\n") {
 		spec += "\n"
 	}
@@ -128,6 +143,26 @@ func RewriteDeployment(p Paths, name, spec string) error {
 		return err
 	}
 	return os.Rename(tmp, filepath.Join(p.Deployments, name+".toml"))
+}
+
+// CreateRawDeployment writes a brand-new spec file verbatim — the "paste a
+// spec" lane: a single-app toml or a whole [[app]] stack (reconcile expands
+// stacks into one app per member). Refuses to clobber an existing
+// deployment; that one is edited in place on the on-this-host tab.
+func CreateRawDeployment(p Paths, name, spec string) error {
+	if !deployName.MatchString(name) {
+		return fmt.Errorf("bad deployment name")
+	}
+	if _, err := os.Stat(filepath.Join(p.Deployments, name+".toml")); err == nil {
+		return fmt.Errorf("deployment %q already exists — edit it on the on-this-host tab", name)
+	}
+	if strings.TrimSpace(spec) == "" {
+		return fmt.Errorf("empty spec — paste a deployment toml or a stack")
+	}
+	if err := checkSpecShape(spec); err != nil {
+		return err
+	}
+	return writeSpec(p, name, spec)
 }
 
 // writeList renders `key = ["a", "b"]` from a comma-separated string.
