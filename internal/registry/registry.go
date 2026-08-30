@@ -1,5 +1,6 @@
-// Package registry reads the ply registry's apps catalog — the same
-// state.json `ply search` reads, scoped to the runnable-apps namespace.
+// Package registry reads the ply registry's catalog — the same state.json
+// `ply search` reads. The ROOT catalog, so a user's own published apps are
+// installable from their dashboard, not just the official `apps` shelf.
 package registry
 
 import (
@@ -10,10 +11,19 @@ import (
 	"time"
 )
 
-const appsStateURL = "https://registry.plybox.sh/apps/state.json"
+const rootStateURL = "https://registry.plybox.sh/state.json"
+
+// The official shelf of runnable apps. Its packages are referenced bare
+// (`postgres`), which is also what ply resolves a bare name to.
+const officialNS = "apps"
 
 type App struct {
-	Owner       string
+	Owner     string
+	Namespace string
+	// Ref is what a deployment's `app =` must say: bare for the official
+	// shelf, `<namespace>/<name>` for everything else. ply resolves a bare
+	// name against apps/ only, so an unqualified user package 404s.
+	Ref         string
 	Name        string
 	Type        string
 	Description string
@@ -27,6 +37,7 @@ type App struct {
 type state struct {
 	Packages []struct {
 		Owner       string `json:"owner"`
+		Namespace   string `json:"namespace"`
 		Name        string `json:"name"`
 		Type        string `json:"type"`
 		Description string `json:"description"`
@@ -51,7 +62,7 @@ type Client struct {
 	lastErr error
 }
 
-func NewClient() *Client { return &Client{url: appsStateURL} }
+func NewClient() *Client { return &Client{url: rootStateURL} }
 
 func (c *Client) Apps() ([]App, error) {
 	c.mu.Lock()
@@ -89,8 +100,14 @@ func fetch(url string) ([]App, error) {
 		if p.Type != "" && p.Type != "app" {
 			continue // layers and stacks are not one-click installs (yet)
 		}
+		ref := p.Name
+		if p.Namespace != "" && p.Namespace != officialNS {
+			ref = p.Namespace + "/" + p.Name
+		}
 		app := App{
 			Owner:       p.Owner,
+			Namespace:   p.Namespace,
+			Ref:         ref,
 			Name:        p.Name,
 			Type:        p.Type,
 			Description: p.Description,
@@ -110,7 +127,18 @@ func fetch(url string) ([]App, error) {
 		}
 		apps = append(apps, app)
 	}
-	sort.Slice(apps, func(a, b int) bool { return apps[a].Name < apps[b].Name })
+	// Official apps lead — they are the ones most installs want, and a
+	// stranger's package must not outrank postgres on alphabetical luck.
+	sort.Slice(apps, func(a, b int) bool {
+		x, y := apps[a], apps[b]
+		if (x.Namespace == officialNS) != (y.Namespace == officialNS) {
+			return x.Namespace == officialNS
+		}
+		if x.Namespace != y.Namespace {
+			return x.Namespace < y.Namespace
+		}
+		return x.Name < y.Name
+	})
 	return apps, nil
 }
 
