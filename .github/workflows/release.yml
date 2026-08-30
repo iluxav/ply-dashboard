@@ -43,3 +43,17 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" --generate-notes || true
           gh release upload "$GITHUB_REF_NAME" dashboard-*-linux-*.img --clobber
+
+      # A runner cannot do the device flow, so it publishes with a key.
+      # This is the step that actually SHIPS: every host runs the dashboard
+      # from `app = "dashboard"`, which resolves the newest apps/dashboard on
+      # each reconcile beat. A release that only reaches GitHub reaches nobody.
+      - name: publish to the registry
+        env:
+          PLY_TOKEN: ${{ secrets.PLY_TOKEN }}
+        run: |
+          test -n "$PLY_TOKEN" || { echo "::error::PLY_TOKEN secret is not set"; exit 1; }
+          for img in dashboard-*-linux-*.img; do
+            echo "==> $img"
+            ply push "$img" --as apps
+          done
