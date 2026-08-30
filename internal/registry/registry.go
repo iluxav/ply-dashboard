@@ -51,14 +51,20 @@ type state struct {
 	} `json:"packages"`
 }
 
-// Client caches the catalog for five minutes — the dashboard must not
-// hammer the registry on every page load, and stale-by-minutes is fine.
+// Client holds the catalog between page loads so the dashboard does not
+// hammer the registry, but a push must be visible almost at once — five
+// minutes here on top of the CDN's own TTL meant a just-published package
+// could stay invisible for ten. So: a short window, then a conditional
+// request. A 304 costs nothing and keeps the entries we already parsed.
+const freshFor = 15 * time.Second
+
 type Client struct {
 	url string
 
 	mu      sync.Mutex
 	apps    []App
 	fetched time.Time
+	etag    string
 	lastErr error
 }
 
@@ -67,24 +73,44 @@ func NewClient() *Client { return &Client{url: rootStateURL} }
 func (c *Client) Apps() ([]App, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if time.Since(c.fetched) < 5*time.Minute && (c.apps != nil || c.lastErr != nil) {
+	if time.Since(c.fetched) < freshFor && (c.apps != nil || c.lastErr != nil) {
 		return c.apps, c.lastErr
 	}
-	c.apps, c.lastErr = fetch(c.url)
+	apps, etag, err := fetchCond(c.url, c.etag)
 	c.fetched = time.Now()
+	if err == nil && apps == nil {
+		return c.apps, c.lastErr // 304: unchanged, keep what we parsed
+	}
+	c.apps, c.etag, c.lastErr = apps, etag, err
 	return c.apps, c.lastErr
 }
 
 func fetch(url string) ([]App, error) {
+	apps, _, err := fetchCond(url, "")
+	return apps, err
+}
+
+// fetchCond returns (nil, etag, nil) when the catalog is unchanged.
+func fetchCond(url, etag string) ([]App, string, error) {
 	client := http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(url)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
-		return nil, err
+		return nil, "", err
+	}
+	if etag != "" {
+		req.Header.Set("If-None-Match", etag)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, "", err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotModified {
+		return nil, etag, nil
+	}
 	var s state
 	if err := json.NewDecoder(resp.Body).Decode(&s); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	var apps []App
 	for _, p := range s.Packages {
@@ -97,8 +123,8 @@ func fetch(url string) ([]App, error) {
 			}
 		}
 		sort.Sort(sort.Reverse(sort.StringSlice(versions)))
-		if p.Type != "" && p.Type != "app" {
-			continue // layers and stacks are not one-click installs (yet)
+		if p.Type == "layer" {
+			continue // a keg is consumed by a build, never deployed
 		}
 		ref := p.Name
 		if p.Namespace != "" && p.Namespace != officialNS {
@@ -139,7 +165,7 @@ func fetch(url string) ([]App, error) {
 		}
 		return x.Name < y.Name
 	})
-	return apps, nil
+	return apps, resp.Header.Get("ETag"), nil
 }
 
 // Contract: the env vars each known service understands, prefilled in the

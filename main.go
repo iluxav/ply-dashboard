@@ -706,6 +706,23 @@ func (s *server) envDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) deployCreate(w http.ResponseWriter, r *http.Request) {
+	// A stack deploys by reference: reconcile fetches it every beat and
+	// expands one unit per member, so none of the single-app fields below
+	// (version, publish, env) apply — they belong to the members.
+	if r.FormValue("kind") == "stack" {
+		err := plystate.WriteStackDeployment(
+			s.paths,
+			strings.TrimSpace(r.FormValue("name")),
+			strings.TrimSpace(r.FormValue("app")),
+		)
+		if err != nil {
+			http.Redirect(w, r, "/deploy?tab=new&err="+template.URLQueryEscaper(err.Error()), http.StatusSeeOther)
+			return
+		}
+		s.fresh.Kick()
+		http.Redirect(w, r, "/deploy", http.StatusSeeOther)
+		return
+	}
 	err := plystate.WriteDeployment(
 		s.paths,
 		strings.TrimSpace(r.FormValue("name")),

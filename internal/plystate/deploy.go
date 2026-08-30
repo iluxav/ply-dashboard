@@ -125,11 +125,11 @@ func RewriteDeployment(p Paths, name, spec string) error {
 
 // A spec that could never converge: no source key and no [[app]] stack
 // blocks. Everything else is `ply reconcile`'s judgment call.
-var specShape = regexp.MustCompile(`(?m)^\s*(app|image|url|github|repo)\s*=|^\s*\[\[app\]\]`)
+var specShape = regexp.MustCompile(`(?m)^\s*(app|image|url|github|repo|stack)\s*=|^\s*\[\[app\]\]`)
 
 func checkSpecShape(spec string) error {
 	if !specShape.MatchString(spec) {
-		return fmt.Errorf("spec needs one of app/image/url/github/repo, or [[app]] stack blocks — nothing to deploy otherwise")
+		return fmt.Errorf("spec needs one of app/image/url/github/repo/stack, or [[app]] stack blocks — nothing to deploy otherwise")
 	}
 	return nil
 }
@@ -277,6 +277,25 @@ func renderEnv(b *strings.Builder, envLines string) {
 		}
 	}
 }
+
+// WriteStackDeployment lands the stack lane: a deployment that NAMES a
+// published stack rather than spelling it out. Reconcile fetches it on every
+// beat and expands one unit per member, so republishing the stack — a member
+// added, a port moved — converges here too. `ref` is `<namespace>/<name>`;
+// no version, deliberately: newest always wins, exactly like an unpinned
+// member. Secrets stay out of the spec — the stack's own env_file fills its
+// `$VAR` holes.
+func WriteStackDeployment(p Paths, name, ref string) error {
+	if !deployName.MatchString(name) {
+		return fmt.Errorf("deployment name must be [a-z0-9-], got %q", name)
+	}
+	if !stackRef.MatchString(ref) {
+		return fmt.Errorf("stack reference must look like <namespace>/<name>, got %q", ref)
+	}
+	return writeSpec(p, name, fmt.Sprintf("stack = %q\n", ref))
+}
+
+var stackRef = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$`)
 
 // WriteDeployment renders and atomically lands a spec file.
 // env is KEY=VALUE lines; blank values are dropped (unfilled form rows).
