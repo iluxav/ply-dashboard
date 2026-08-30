@@ -53,7 +53,12 @@ jobs:
           PLY_TOKEN: ${{ secrets.PLY_TOKEN }}
         run: |
           test -n "$PLY_TOKEN" || { echo "::error::PLY_TOKEN secret is not set"; exit 1; }
+          # Both shelves while `apps/` is being folded into `ply/`: hosts
+          # released before the fold resolve a bare `dashboard` through
+          # apps/, hosts after it through ply/. Drop the apps/ line once
+          # every host has self-updated past the flip.
           for img in dashboard-*-linux-*.img; do
             echo "==> $img"
+            ply push "$img" --as ply
             ply push "$img" --as apps
           done
