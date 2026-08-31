@@ -215,6 +215,35 @@ type MemberOverride struct {
 // names none), then write the deployment. The pasted text goes to disk
 // verbatim unless something was actually edited — then the file is a
 // canonical re-render of the parsed stack (comments don't survive that).
+// DeployStackRef lands the TRACKED lane: the deployment names the published
+// stack (`stack = "<ns>/<name>"`) instead of copying it, so reconcile
+// re-fetches it every beat and a republished shape converges. `spec` is the
+// fetched template — used only to find where its `$VAR` holes are kept, since
+// the values still have to reach a file on this host.
+//
+// Member publish/domain are NOT editable here, deliberately: the published
+// stack owns its shape. Editing means untracking, which is the copy lane.
+func DeployStackRef(p Paths, name, ref, spec string, values map[string]string) error {
+	if len(values) > 0 {
+		view, err := ParseStack(p, spec)
+		if err != nil {
+			return err
+		}
+		if view == nil {
+			return fmt.Errorf("the published stack has no [[app]] blocks")
+		}
+		if view.EnvFile == "" {
+			return fmt.Errorf(
+				"this stack declares no env_file, so there is nowhere to keep %d value(s) — deploy it untracked to have one written for you",
+				len(values))
+		}
+		if err := mergeEnvFile(view.envFilePath(p), values); err != nil {
+			return err
+		}
+	}
+	return WriteStackDeployment(p, name, ref)
+}
+
 func DeployStack(p Paths, name, spec string, values map[string]string, overrides map[int]MemberOverride) error {
 	if !deployName.MatchString(name) {
 		return fmt.Errorf("bad deployment name")

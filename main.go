@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"html/template"
+	"io"
 	"io/fs"
 	"log"
 	"net/http"
@@ -257,6 +258,7 @@ func main() {
 	mux.HandleFunc("POST /env/save", s.guard(s.envSave))
 	mux.HandleFunc("POST /env/delete", s.guard(s.envDelete))
 	mux.HandleFunc("POST /deploy/inspect", s.guard(s.sourceInspect))
+	mux.HandleFunc("POST /deploy/registry-stack", s.guard(s.registryStackForm))
 	mux.HandleFunc("POST /deploy/enroll", s.guard(s.fleetEnroll))
 	mux.HandleFunc("POST /deploy/preview", s.guard(s.sourcePreview))
 	mux.HandleFunc("POST /deploy/source", s.guard(s.sourceCreate))
@@ -355,6 +357,7 @@ type sourceForm struct {
 	Token      string
 	Spec       plystate.SourceSpec
 	Gh         plystate.GithubSpec
+	StackRef   string              // set when the stack came from the registry catalog
 	Stack      *plystate.StackView // parsed from the repo's stack.toml, if any
 	Mode       string              // "stack" | "single" — which form shows when both apply
 	Preview    string
@@ -780,6 +783,56 @@ func (s *server) deployEdit(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/deploy", http.StatusSeeOther)
 }
 
+// registryStackForm: picking a stack from the catalog must show what it will
+// do before it does it — the same courtesy the pasted-repo lane already
+// extends. Fetch the published template, parse it, and render the very same
+// member cards and $VAR inputs; nothing is written until that form is
+// submitted.
+func (s *server) registryStackForm(w http.ResponseWriter, r *http.Request) {
+	ref := strings.TrimSpace(r.FormValue("ref"))
+	if ref == "" {
+		ref = strings.TrimSpace(r.FormValue("app")) // the catalog card's field name
+	}
+	src := strings.TrimSpace(r.FormValue("src"))
+	name := strings.TrimSpace(r.FormValue("name"))
+	form := &sourceForm{StackRef: ref, Inspected: true, Mode: "stack"}
+
+	spec, err := fetchText(src)
+	if err != nil {
+		form.Error = fmt.Sprintf("could not fetch %s: %v", src, err)
+		s.render(w, "deploy_source", "deploy_source", pageData{Source: form})
+		return
+	}
+	form.Insp.StackToml = spec
+	form.Insp.StackName = name
+	if view, err := plystate.ParseStack(s.paths, spec); err == nil && view != nil {
+		form.Stack = view
+		if view.Name != "" {
+			form.Insp.StackName = view.Name
+		}
+	}
+	s.render(w, "deploy_source", "deploy_source", pageData{Source: form})
+}
+
+// fetchText pulls a small text artifact (a published stack toml) from the
+// registry. Bounded: a catalog entry is data, not a licence to stream.
+func fetchText(url string) (string, error) {
+	if !strings.HasPrefix(url, "https://") {
+		return "", fmt.Errorf("refusing a non-https source")
+	}
+	client := http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("http %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
+	return string(body), err
+}
+
 // deployStackCreate lands the inspected-stack form: the spec verbatim plus
 // one var_<KEY> field per $VAR hole, merged into the env file the stack
 // references before the deployment file is written.
@@ -809,6 +862,18 @@ func (s *server) deployStackCreate(w http.ResponseWriter, r *http.Request) {
 				overrides[i] = ov
 			}
 		}
+	}
+	// Tracked: the deployment names the published stack, so the member
+	// overrides above do not apply — only the $VAR values, which still have
+	// to land in a file on this host.
+	if ref := strings.TrimSpace(r.FormValue("ref")); ref != "" && r.FormValue("track") == "1" {
+		if err := plystate.DeployStackRef(s.paths, name, ref, r.FormValue("spec"), values); err != nil {
+			http.Redirect(w, r, "/deploy?tab=new&err="+template.URLQueryEscaper(err.Error()), http.StatusSeeOther)
+			return
+		}
+		s.fresh.Kick()
+		http.Redirect(w, r, "/deploy", http.StatusSeeOther)
+		return
 	}
 	if err := plystate.DeployStack(s.paths, name, r.FormValue("spec"), values, overrides); err != nil {
 		http.Redirect(w, r, "/deploy?tab=new&err="+template.URLQueryEscaper(err.Error()), http.StatusSeeOther)

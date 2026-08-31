@@ -69,6 +69,20 @@
         <input name="name" value="{{.Insp.StackName}}" class="bg-card border border-edge rounded px-2 py-1.5 text-ink">
       </label>
 
+      {{with .StackRef}}
+      <input type="hidden" name="ref" value="{{.}}">
+      <label class="flex items-start gap-2 text-ink/80 border border-edge/60 rounded px-3 py-2">
+        <input type="checkbox" name="track" value="1" checked class="mt-0.5">
+        <span>
+          track <span class="font-mono">{{.}}</span> — the deployment names the published stack and
+          reconcile re-fetches it every beat, so a republished shape (a member added, a port moved)
+          arrives on its own.
+          <span class="text-fade/50 block mt-0.5">untick to copy it instead: the members below become
+          yours to edit, and later changes to the published stack are ignored.</span>
+        </span>
+      </label>
+      {{end}}
+
       {{if .Stack}}
       <div class="grid gap-2">
         {{range $i, $m := .Stack.Members}}

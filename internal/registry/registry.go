@@ -27,11 +27,15 @@ type App struct {
 	Name        string
 	Type        string
 	Description string
-	Contract    string   // env lines to prefill on deploy
-	Publish     string   // suggested --publish
-	GrantLinks  bool     // the app needs its [requests] links granted
-	Origin      string   // phantom packages: where the bytes actually live
-	Versions    []string // newest first, deduped across arches
+	Contract    string // env lines to prefill on deploy
+	Publish     string // suggested --publish
+	GrantLinks  bool   // the app needs its [requests] links granted
+	Origin      string // phantom packages: where the bytes actually live
+	// Src is the newest version's canonical location. For a stack that is
+	// the published toml itself — what the deploy form fetches to show the
+	// members before anything is written.
+	Src      string
+	Versions []string // newest first, deduped across arches
 }
 
 type state struct {
@@ -47,6 +51,7 @@ type state struct {
 		Origin      string `json:"origin"`
 		Versions    []struct {
 			Version string `json:"version"`
+			Src     string `json:"src"`
 		} `json:"versions"`
 	} `json:"packages"`
 }
@@ -123,6 +128,13 @@ func fetchCond(url, etag string) ([]App, string, error) {
 			}
 		}
 		sort.Sort(sort.Reverse(sort.StringSlice(versions)))
+		var src string
+		for _, v := range p.Versions {
+			if len(versions) > 0 && v.Version == versions[0] && v.Src != "" {
+				src = v.Src
+				break
+			}
+		}
 		if p.Type == "layer" {
 			continue // a keg is consumed by a build, never deployed
 		}
@@ -141,6 +153,7 @@ func fetchCond(url, etag string) ([]App, string, error) {
 			Publish:     p.Publish,
 			GrantLinks:  p.GrantLinks,
 			Origin:      p.Origin,
+			Src:         src,
 			Versions:    versions,
 		}
 		// catalog wins; the compiled-in table is only a fallback for

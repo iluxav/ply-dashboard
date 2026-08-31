@@ -78,12 +78,12 @@
       </label>
       {{if eq .Type "stack"}}
       <div class="md:col-span-2 text-fade/50">
-        writes <span class="text-fade">stack = "{{.Ref}}"</span> — reconcile fetches the stack every beat
-        and runs one unit per member. Versions, ports and env belong to the members; its
-        <span class="text-fade">$VAR</span> holes come from the stack's own env file.
+        a stack runs one app per member. The next step shows them, and asks for the
+        <span class="text-fade">$VAR</span> values it needs — nothing is deployed until then.
       </div>
       <div class="md:col-span-2">
-        <button class="bg-accent text-ground rounded px-4 py-1.5 font-bold hover:bg-accent-bright">deploy stack</button>
+        <button formaction="/deploy/registry-stack" name="src" value="{{.Src}}"
+                class="bg-accent text-ground rounded px-4 py-1.5 font-bold hover:bg-accent-bright">configure…</button>
       </div>
       {{else}}
       <label class="grid gap-1">
