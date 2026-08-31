@@ -23,7 +23,7 @@ type StackView struct {
 	Description string
 	EnvFile     string // [stack] env_file as written, or ""
 	Members     []StackMember
-	Holes       []EnvHole // unique $VARs across member envs, declaration order
+	Holes       []EnvHole // unique $VARs across member env/publish/domain, in order
 }
 
 type StackMember struct {
@@ -108,11 +108,17 @@ func ParseStack(p Paths, text string) (*StackView, error) {
 			m.Name = memberName(a.Run)
 		}
 		view.Members = append(view.Members, m)
-		for _, kv := range a.E {
-			for _, hit := range holePattern.FindAllStringSubmatch(kv, -1) {
-				if !seen[hit[1]] {
-					seen[hit[1]] = true
-					view.Holes = append(view.Holes, EnvHole{Key: hit[1]})
+		// Holes live in publish and domain too, not only in env: a stack
+		// published for other people cannot know their hostname, nor which
+		// ports are already taken on their host. Miss those and the form
+		// never asks, so the deployment lands with an unfilled $VAR.
+		for _, field := range [][]string{a.E, a.Publish, a.Domain} {
+			for _, value := range field {
+				for _, hit := range holePattern.FindAllStringSubmatch(value, -1) {
+					if !seen[hit[1]] {
+						seen[hit[1]] = true
+						view.Holes = append(view.Holes, EnvHole{Key: hit[1]})
+					}
 				}
 			}
 		}
