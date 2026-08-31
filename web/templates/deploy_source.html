@@ -72,19 +72,38 @@
       {{with .StackRef}}
       <input type="hidden" name="ref" value="{{.}}">
       <label class="flex items-start gap-2 text-ink/80 border border-edge/60 rounded px-3 py-2">
-        <input type="checkbox" name="track" value="1" checked class="mt-0.5">
+        <input type="checkbox" name="track" value="1" checked class="mt-0.5"
+               onchange="plyTrack(this)">
         <span>
           track <span class="font-mono">{{.}}</span> — the deployment names the published stack and
           reconcile re-fetches it every beat, so a republished shape (a member added, a port moved)
-          arrives on its own.
-          <span class="text-fade/50 block mt-0.5">untick to copy it instead: the members below become
-          yours to edit, and later changes to the published stack are ignored.</span>
+          arrives on its own. The stack owns its members, so their fields below are the
+          publisher's to set.
+          <span class="text-fade/50 block mt-0.5">untick to copy it instead: the members become
+          yours to edit — a domain of your own, a port that suits this host — and later changes to
+          the published stack are ignored.</span>
         </span>
       </label>
+      <script>
+        // A tracked deploy writes `stack = "<ns>/<name>"` and nothing else, so
+        // member edits could not apply. Disabling says so plainly instead of
+        // accepting a domain and dropping it — and a disabled field is not
+        // submitted, so the server never sees an override it must refuse.
+        function plyTrack(box) {
+          var wrap = document.getElementById('member-fields');
+          if (!wrap) return;
+          wrap.querySelectorAll('input').forEach(function (i) { i.disabled = box.checked; });
+          wrap.style.opacity = box.checked ? '0.55' : '1';
+        }
+        document.addEventListener('DOMContentLoaded', function () {
+          var box = document.querySelector('input[name="track"]');
+          if (box) plyTrack(box);
+        });
+      </script>
       {{end}}
 
       {{if .Stack}}
-      <div class="grid gap-2">
+      <div class="grid gap-2" id="member-fields">
         {{range $i, $m := .Stack.Members}}
         <div class="border border-edge rounded px-3 py-2 grid gap-1.5">
           <div class="text-ink">{{$m.Name}}{{if $m.After}} <span class="text-fade/40">after {{range $m.After}}{{.}} {{end}}</span>{{end}}</div>

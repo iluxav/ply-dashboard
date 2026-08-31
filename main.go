@@ -792,6 +792,34 @@ func (s *server) deployEdit(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/deploy", http.StatusSeeOther)
 }
 
+// editedMembers names the first member field the form changed from what the
+// published stack declares, or "" when nothing was touched. Disabled inputs
+// are not submitted, so with JS this never fires; without it, it is the
+// difference between a clear error and a silently ignored domain.
+func editedMembers(r *http.Request, spec string, p plystate.Paths) string {
+	view, err := plystate.ParseStack(p, spec)
+	if err != nil || view == nil {
+		return ""
+	}
+	for i, m := range view.Members {
+		for _, f := range []struct {
+			field, was string
+		}{
+			{"publish", m.PublishCSV()},
+			{"domain", m.DomainCSV()},
+		} {
+			got := r.FormValue(fmt.Sprintf("m%d_%s", i, f.field))
+			if _, ok := r.Form[fmt.Sprintf("m%d_%s", i, f.field)]; !ok {
+				continue // not submitted at all (disabled, or an older form)
+			}
+			if strings.Join(splitCSV(got), ",") != strings.Join(splitCSV(f.was), ",") {
+				return fmt.Sprintf("member %q: %s was edited", m.Name, f.field)
+			}
+		}
+	}
+	return ""
+}
+
 // registryStackForm: picking a stack from the catalog must show what it will
 // do before it does it — the same courtesy the pasted-repo lane already
 // extends. Fetch the published template, parse it, and render the very same
@@ -876,6 +904,15 @@ func (s *server) deployStackCreate(w http.ResponseWriter, r *http.Request) {
 	// overrides above do not apply — only the $VAR values, which still have
 	// to land in a file on this host.
 	if ref := strings.TrimSpace(r.FormValue("ref")); ref != "" && r.FormValue("track") == "1" {
+		// Refuse rather than drop. A tracked deployment is the reference and
+		// nothing else, so an override here cannot be honoured — and silently
+		// discarding a domain someone typed is how a site ends up served on a
+		// hostname they never chose.
+		if edited := editedMembers(r, r.FormValue("spec"), s.paths); edited != "" {
+			err := fmt.Sprintf("%s — a tracked deployment takes its members from the published stack; untick “track” to edit them here", edited)
+			http.Redirect(w, r, "/deploy?tab=new&err="+template.URLQueryEscaper(err), http.StatusSeeOther)
+			return
+		}
 		if err := plystate.DeployStackRef(s.paths, name, ref, r.FormValue("spec"), values); err != nil {
 			http.Redirect(w, r, "/deploy?tab=new&err="+template.URLQueryEscaper(err.Error()), http.StatusSeeOther)
 			return
