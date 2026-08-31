@@ -610,10 +610,19 @@ func (s *server) deployPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) renderDeploy(w http.ResponseWriter, tab, deployErr string) {
+	s.renderDeployWith(w, tab, deployErr, nil)
+}
+
+// renderDeployWith renders the whole deploy page, optionally with the
+// from-source wizard already filled in. A fragment render is only correct
+// for htmx, which swaps into a page that already has its stylesheet; a plain
+// form POST navigates, so it must get the page and not just the piece.
+func (s *server) renderDeployWith(w http.ResponseWriter, tab, deployErr string, src *sourceForm) {
 	if tab != "new" && tab != "env" {
 		tab = "host"
 	}
 	data := pageData{
+		Source:          src,
 		Authed:          true,
 		Tab:             tab,
 		DeployAvailable: plystate.DeploymentsAvailable(s.paths),
@@ -800,7 +809,7 @@ func (s *server) registryStackForm(w http.ResponseWriter, r *http.Request) {
 	spec, err := fetchText(src)
 	if err != nil {
 		form.Error = fmt.Sprintf("could not fetch %s: %v", src, err)
-		s.render(w, "deploy_source", "deploy_source", pageData{Source: form})
+		s.renderDeployWith(w, "new", form.Error, form)
 		return
 	}
 	form.Insp.StackToml = spec
@@ -811,7 +820,7 @@ func (s *server) registryStackForm(w http.ResponseWriter, r *http.Request) {
 			form.Insp.StackName = view.Name
 		}
 	}
-	s.render(w, "deploy_source", "deploy_source", pageData{Source: form})
+	s.renderDeployWith(w, "new", "", form)
 }
 
 // fetchText pulls a small text artifact (a published stack toml) from the
