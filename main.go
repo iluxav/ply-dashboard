@@ -241,6 +241,8 @@ func main() {
 	mux.HandleFunc("GET /partials/logs/{name}", s.guard(s.logsPartial))
 	mux.HandleFunc("POST /app/{name}/scale", s.guard(s.scaleAction))
 	mux.HandleFunc("POST /app/{name}/restart", s.guard(s.restartAction))
+	mux.HandleFunc("POST /app/{name}/snapshot", s.guard(s.snapshotAction))
+	mux.HandleFunc("POST /app/{name}/restore", s.guard(s.restoreAction))
 	mux.HandleFunc("GET /deploy", s.guard(s.deployPage))
 	mux.HandleFunc("POST /deploy", s.guard(s.deployCreate))
 	mux.HandleFunc("POST /deploy/{name}/delete", s.guard(s.deployDelete))
@@ -323,6 +325,7 @@ type pageData struct {
 	ScaleUp    int
 	ScaleDown  int
 	LastResult *plystate.CommandResult
+	Snapshots  []plystate.Snapshot
 
 	DeployAvailable bool
 	Fleet           *plystate.DeployStatus
@@ -497,6 +500,7 @@ func (s *server) liveData(name string, app plystate.App) pageData {
 		ScaleUp:    n + 1,
 		ScaleDown:  max(n-1, 1),
 		LastResult: plystate.LastResult(s.paths, name),
+		Snapshots:  plystate.Snapshots(s.paths, name),
 	}
 }
 
@@ -525,6 +529,37 @@ func (s *server) restartAction(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := plystate.SubmitControl(s.paths, name, "restart", ""); err != nil {
 		log.Printf("restart %s: %v", name, err)
+	}
+	s.render(w, "instances", "instances", s.liveData(name, app))
+}
+
+func (s *server) snapshotAction(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	app, ok := s.app(name)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	if err := plystate.SubmitSnapshot(s.paths, name); err != nil {
+		log.Printf("snapshot %s: %v", name, err)
+	}
+	s.render(w, "instances", "instances", s.liveData(name, app))
+}
+
+func (s *server) restoreAction(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	app, ok := s.app(name)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	// The snapshot name is a filename component ply itself wrote; still,
+	// only submit a plausible one — the parent re-validates before acting.
+	snap := r.URL.Query().Get("name")
+	if snap != "" && !strings.ContainsAny(snap, "/\\\x00") {
+		if err := plystate.SubmitRestore(s.paths, name, snap); err != nil {
+			log.Printf("restore %s: %v", name, err)
+		}
 	}
 	s.render(w, "instances", "instances", s.liveData(name, app))
 }

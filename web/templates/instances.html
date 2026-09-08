@@ -72,7 +72,44 @@
   {{end}}{{end}}
   {{with .LastResult}}<span class="ml-4 {{if .OK}}text-fade/70{{else}}text-red-400{{end}}">{{.}}</span>{{end}}
 </div>
+{{template "snapshots" .}}
 {{else}}
 <div class="text-fade/35 text-xs mt-4">observe-only — the apps dir grant is read-only; commands need it writable</div>
+{{template "snapshots" .}}
+{{end}}
+{{end}}
+
+{{define "snapshots"}}
+{{if or .Snapshots .Writable}}
+<div class="mt-6 border-t border-edge/60 pt-3">
+  <div class="flex items-center gap-3 text-xs">
+    <span class="text-fade/50">snapshots</span>
+    {{if .Writable}}
+    <button hx-post="/app/{{.AppName}}/snapshot" hx-target="#live" hx-swap="innerHTML"
+            hx-confirm="Snapshot {{.AppName}}'s volumes now? The app is held still for the copy (seconds)."
+            class="border border-edge rounded px-2 py-0.5 hover:border-accent">take snapshot</button>
+    {{end}}
+    <span class="text-fade/35">volume backups you can roll back onto</span>
+  </div>
+  {{if .Snapshots}}
+  <div class="mt-2 space-y-1 text-xs font-mono">
+  {{range .Snapshots}}
+    <div class="flex items-baseline gap-3">
+      <span class="text-fade/50 w-40 shrink-0">{{.Taken}}</span>
+      <span class="text-fade/60 w-16 shrink-0 text-right">{{.Size}}</span>
+      <span class="text-fade/50 shrink-0">slot {{.Slot}}</span>
+      <span class="text-fade/40 truncate">{{range .VolumeNames}}{{.}} {{end}}</span>
+      {{if $.Writable}}
+      <button hx-post="/app/{{$.AppName}}/restore?name={{.Name}}" hx-target="#live" hx-swap="innerHTML"
+              hx-confirm="Restore {{$.AppName}}.{{.Slot}} to this snapshot? The slot rolls; what it wrote since is replaced (the previous volume is kept)."
+              class="text-fade/50 hover:text-accent shrink-0 ml-auto border border-edge/60 rounded px-2 py-0.5">restore</button>
+      {{end}}
+    </div>
+  {{end}}
+  </div>
+  {{else}}
+  <div class="mt-2 text-fade/35 text-xs">none yet — take one before you need it</div>
+  {{end}}
+</div>
 {{end}}
 {{end}}

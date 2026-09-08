@@ -11,6 +11,9 @@
     {{else if eq .Event "scale"}}<span class="text-fade/80 w-28 shrink-0">scale</span>
     {{else if eq .Event "restart"}}<span class="text-accent/90 w-28 shrink-0">restart</span>
     {{else if eq .Event "instance-restart"}}<span class="text-red-400/80 w-28 shrink-0">crash-respawn</span>
+    {{else if eq .Event "snapshot"}}<span class="text-green-500/70 w-28 shrink-0">snapshot</span>
+    {{else if eq .Event "snapshot-failed"}}<span class="text-red-400 w-28 shrink-0">snapshot-failed</span>
+    {{else if eq .Event "restore"}}<span class="text-accent/90 w-28 shrink-0">restore</span>
     {{else}}<span class="text-fade/70 w-28 shrink-0">{{.Event}}</span>{{end}}
     <a href="/app/{{.App}}" class="text-ink/80 hover:underline shrink-0">{{.App}}</a>
     <span class="text-fade/70 truncate">{{.Detail}}</span>
