@@ -13,7 +13,7 @@ release:
 	echo "$$V" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$$' || { echo "release: bad version \`$$V\`"; exit 1; }; \
 	echo "release: $$CUR -> $$V"; \
 	go vet ./... && go test ./...; \
-	sed -i "s/^version = \".*\"/version = \"$$V\"/" ply.toml; \
+	tmp=$$(mktemp); sed "s/^version = \".*\"/version = \"$$V\"/" ply.toml > "$$tmp" && mv "$$tmp" ply.toml; \
 	git add ply.toml; \
 	git commit -m "v$$V"; \
 	git push; \
