@@ -36,6 +36,7 @@ links = [
   "/run/ply:/ply/host/run",
   "/var/lib/ply/apps:/ply/host/apps",
   "/var/lib/ply/deployments:/ply/host/deployments",
+  "/var/lib/ply/config:/ply/host/config",
   "/sys/fs/cgroup:/ply/host/cgroup",
   "/proc:/ply/host/proc",
 ]

@@ -18,6 +18,7 @@
       <nav class="flex items-center gap-1 text-xs">
         <a href="/" class="px-2 py-1 rounded {{if eq .Section "apps"}}bg-card text-ink{{else}}text-fade/70 hover:text-ink{{end}}">apps</a>
         <a href="/deploy" class="px-2 py-1 rounded {{if eq .Section "deploy"}}bg-card text-ink{{else}}text-fade/70 hover:text-ink{{end}}">deploy</a>
+        <a href="/notify" class="px-2 py-1 rounded {{if eq .Section "notify"}}bg-card text-ink{{else}}text-fade/70 hover:text-ink{{end}}">notify</a>
       </nav>
       {{block "crumb" .}}{{end}}
     </div>

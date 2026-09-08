@@ -1,0 +1,79 @@
+{{define "title"}}ply · notifications{{end}}
+{{define "crumb"}}{{end}}
+{{define "content"}}
+<h1 class="text-ink text-lg mb-1">notifications</h1>
+<p class="text-fade/60 text-xs mb-6">
+  ply tells you when something happens — one message per event, on the reconcile beat.
+  This writes <span class="text-fade">notify.toml</span>; delivery is ply's.
+</p>
+
+{{if not .NotifyWritable}}
+<div class="text-fade/40 text-xs border border-edge rounded px-3 py-2">
+  the config dir is not a writable grant — run the dashboard with the config link granted
+  (<span class="text-fade">--grant-links</span>) to edit this here; meanwhile it is set on the host with a
+  <span class="text-fade">notify.toml</span> file.
+</div>
+{{end}}
+
+{{if .NotifySaved}}<div class="text-green-400 text-xs mb-4 border border-deep rounded px-3 py-2">saved — the next reconcile beat picks it up</div>{{end}}
+{{if .Error}}<div class="text-red-400 text-xs mb-4 border border-deep rounded px-3 py-2">{{.Error}}</div>{{end}}
+
+<form method="post" action="/notify/save" class="space-y-6 max-w-2xl">
+  <div>
+    <div class="text-accent/80 text-[10px] uppercase tracking-wider mb-2">notify on</div>
+    <div class="grid grid-cols-2 gap-1.5 text-xs">
+    {{range .NotifyEvents}}
+      <label class="flex items-center gap-2 text-fade/80">
+        <input type="checkbox" name="on" value="{{.}}" {{if $.Notify.Has .}}checked{{end}}
+               class="accent-accent">
+        <span>{{.}}</span>
+      </label>
+    {{end}}
+    </div>
+    <div class="text-fade/40 text-[11px] mt-2">
+      restart-loop = 3 crashes of one app in 5 min · disk-high = data filesystem over 90%
+    </div>
+  </div>
+
+  <div>
+    <div class="text-accent/80 text-[10px] uppercase tracking-wider mb-2">telegram</div>
+    <div class="flex flex-col gap-2 text-xs">
+      <input type="text" name="tg_token" value="{{.TgToken}}" placeholder="bot token (123456:ABC-DEF…)"
+             class="bg-card border border-edge rounded px-2 py-1 text-ink font-mono">
+      <input type="text" name="tg_chat" value="{{.TgChat}}" placeholder="chat id (@channel or numeric)"
+             class="bg-card border border-edge rounded px-2 py-1 text-ink font-mono">
+    </div>
+    <div class="text-fade/40 text-[11px] mt-1">from @BotFather; message the bot once, then use its chat id</div>
+  </div>
+
+  <div>
+    <div class="text-accent/80 text-[10px] uppercase tracking-wider mb-2">other destinations</div>
+    <textarea name="others" rows="3" placeholder="discord:https://…&#10;https://your-webhook&#10;command:/usr/bin/mail -s ply ops@example.com&#10;enc:v1:… (a sealed value)"
+              class="w-full bg-card border border-edge rounded px-2 py-1 text-ink font-mono text-xs">{{.OtherDests}}</textarea>
+    <div class="text-fade/40 text-[11px] mt-1">one per line · seal a token with <span class="text-fade">ply secret seal notify=… --for &lt;key&gt;</span> to keep it out of a repo</div>
+  </div>
+
+  <div class="flex items-center gap-3">
+    <button type="submit" {{if not .NotifyWritable}}disabled{{end}}
+            class="bg-accent/90 hover:bg-accent text-ink rounded px-3 py-1 text-xs {{if not .NotifyWritable}}opacity-40 pointer-events-none{{end}}">save</button>
+    <button type="submit" formaction="/notify/test"
+            class="border border-edge hover:border-accent rounded px-3 py-1 text-xs">send test</button>
+    <span class="text-fade/40 text-[11px]">test delivers now to telegram/discord/webhook; command &amp; sealed are tested with <span class="text-fade">ply notify --test</span></span>
+  </div>
+</form>
+
+{{with .TestResults}}
+<div class="mt-5 max-w-2xl">
+  <div class="text-accent/80 text-[10px] uppercase tracking-wider mb-2">test results</div>
+  <div class="space-y-1 text-xs font-mono">
+  {{range .}}
+    <div class="flex items-baseline gap-3">
+      <span class="{{if .OK}}text-green-400{{else}}text-red-400{{end}} w-6">{{if .OK}}ok{{else}}✗{{end}}</span>
+      <span class="text-fade/70">{{.Dest}}</span>
+      {{if not .OK}}<span class="text-red-400/80">{{.Err}}</span>{{end}}
+    </div>
+  {{end}}
+  </div>
+</div>
+{{end}}
+{{end}}

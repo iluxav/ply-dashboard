@@ -244,6 +244,9 @@ func main() {
 	mux.HandleFunc("POST /app/{name}/snapshot", s.guard(s.snapshotAction))
 	mux.HandleFunc("POST /app/{name}/restore", s.guard(s.restoreAction))
 	mux.HandleFunc("GET /deploy", s.guard(s.deployPage))
+	mux.HandleFunc("GET /notify", s.guard(s.notifyPage))
+	mux.HandleFunc("POST /notify/save", s.guard(s.notifySave))
+	mux.HandleFunc("POST /notify/test", s.guard(s.notifyTest))
 	mux.HandleFunc("POST /deploy", s.guard(s.deployCreate))
 	mux.HandleFunc("POST /deploy/{name}/delete", s.guard(s.deployDelete))
 	mux.HandleFunc("GET /partials/deployments", s.guard(s.deploymentsPartial))
@@ -292,6 +295,7 @@ func (s *server) parseTemplates() {
 		"index":  page("web/templates/index.html", "web/templates/apps_table.html", "web/templates/events.html"),
 		"app":    page("web/templates/app.html", "web/templates/instances.html", "web/templates/logs.html", "web/templates/events.html"),
 		"deploy": page("web/templates/deploy.html", "web/templates/deployments.html", "web/templates/deploy_source.html"),
+		"notify": page("web/templates/notify.html"),
 		"login":  page("web/templates/login.html"),
 		"setup":  page("web/templates/setup.html"),
 		// standalone partials for htmx polling
@@ -330,12 +334,21 @@ type pageData struct {
 	DeployAvailable bool
 	Fleet           *plystate.DeployStatus
 	RegistryApps    []registry.App
-	RegistryErr     string
-	DeployErr       string
-	Deployments     []plystate.Deployment
-	Groups          []plystate.DeploymentGroup
-	Source          *sourceForm
-	Events          []plystate.Event
+
+	Notify         plystate.NotifyConfig
+	NotifyEvents   []string
+	NotifyWritable bool
+	TgToken        string
+	TgChat         string
+	OtherDests     string
+	NotifySaved    bool
+	TestResults    []testResult
+	RegistryErr    string
+	DeployErr      string
+	Deployments    []plystate.Deployment
+	Groups         []plystate.DeploymentGroup
+	Source         *sourceForm
+	Events         []plystate.Event
 
 	Tab         string // deploy page: "host" | "new" | "env"
 	DeployCount int
@@ -367,7 +380,7 @@ type sourceForm struct {
 	Error      string
 }
 
-var pageSection = map[string]string{"index": "apps", "app": "apps", "deploy": "deploy"}
+var pageSection = map[string]string{"index": "apps", "app": "apps", "deploy": "deploy", "notify": "notify"}
 
 func (s *server) render(w http.ResponseWriter, page, name string, data pageData) {
 	data.Version = version
@@ -642,6 +655,89 @@ func (s *server) logsPartial(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) deployPage(w http.ResponseWriter, r *http.Request) {
 	s.renderDeploy(w, r.URL.Query().Get("tab"), r.URL.Query().Get("err"))
+}
+
+type testResult struct {
+	Dest string
+	OK   bool
+	Err  string
+}
+
+func (s *server) notifyData() pageData {
+	c := plystate.LoadNotify(s.paths)
+	token, chat := c.Telegram()
+	return pageData{
+		Authed:         true,
+		Notify:         c,
+		NotifyEvents:   plystate.NotifyEvents,
+		NotifyWritable: plystate.NotifyWritable(s.paths),
+		TgToken:        token,
+		TgChat:         chat,
+		OtherDests:     c.Others(),
+	}
+}
+
+func (s *server) notifyPage(w http.ResponseWriter, r *http.Request) {
+	s.render(w, "notify", "base.html", s.notifyData())
+}
+
+// formToConfig reads the events and destinations out of the posted form.
+func formToConfig(r *http.Request) plystate.NotifyConfig {
+	_ = r.ParseForm()
+	return plystate.NotifyConfig{
+		On: r.Form["on"],
+		To: plystate.ComposeTo(
+			r.FormValue("tg_token"),
+			r.FormValue("tg_chat"),
+			r.FormValue("others"),
+		),
+	}
+}
+
+func (s *server) notifySave(w http.ResponseWriter, r *http.Request) {
+	if !plystate.NotifyWritable(s.paths) {
+		http.Error(w, "the config dir is not a writable grant", http.StatusForbidden)
+		return
+	}
+	c := formToConfig(r)
+	data := s.notifyData()
+	if err := plystate.SaveNotify(s.paths, c); err != nil {
+		data.Error = err.Error()
+	} else {
+		data.NotifySaved = true
+		// reflect exactly what was saved
+		data.Notify = c
+		token, chat := c.Telegram()
+		data.TgToken, data.TgChat, data.OtherDests = token, chat, c.Others()
+	}
+	s.render(w, "notify", "base.html", data)
+}
+
+func (s *server) notifyTest(w http.ResponseWriter, r *http.Request) {
+	c := formToConfig(r)
+	var results []testResult
+	for _, d := range c.To {
+		masked := d
+		if i := strings.IndexByte(d, ':'); i > 0 {
+			masked = d[:i] + ":…"
+		}
+		err := plystate.TestDeliver(d, "[ply] test notification from the dashboard — delivery works")
+		results = append(results, testResult{Dest: masked, OK: err == nil, Err: errText(err)})
+	}
+	data := s.notifyData()
+	data.TestResults = results
+	// keep the form as posted, so a test does not wipe unsaved edits
+	data.Notify = c
+	token, chat := c.Telegram()
+	data.TgToken, data.TgChat, data.OtherDests = token, chat, c.Others()
+	s.render(w, "notify", "base.html", data)
+}
+
+func errText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 func (s *server) renderDeploy(w http.ResponseWriter, tab, deployErr string) {

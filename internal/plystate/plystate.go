@@ -27,6 +27,7 @@ type Paths struct {
 	Deployments string // declarative deployments (a deployment is a file)
 	Cgroup      string // cgroup v2 root
 	Proc        string // host procfs (aliveness, rootless stats fallback)
+	Config      string // ply config dir (notify.toml) — granted separately
 }
 
 // Resolve prefers the container grants; on a bare host, `PLY_STATE_DIR`
@@ -42,6 +43,7 @@ func Resolve() Paths {
 			Deployments: "/ply/host/deployments",
 			Cgroup:      "/ply/host/cgroup",
 			Proc:        "/ply/host/proc",
+			Config:      "/ply/host/config",
 		}
 	}
 	rootful := Paths{
@@ -51,6 +53,7 @@ func Resolve() Paths {
 		Deployments: "/var/lib/ply/deployments",
 		Cgroup:      "/sys/fs/cgroup",
 		Proc:        "/proc",
+		Config:      "/var/lib/ply/config",
 	}
 	run := os.Getenv("XDG_RUNTIME_DIR")
 	if run == "" {
@@ -66,6 +69,7 @@ func Resolve() Paths {
 		Deployments: filepath.Join(home, ".local/share/ply/deployments"),
 		Cgroup:      "/sys/fs/cgroup",
 		Proc:        "/proc",
+		Config:      filepath.Join(home, ".local/share/ply/config"),
 	}
 	if dir := os.Getenv("PLY_STATE_DIR"); dir != "" {
 		p := rootful
