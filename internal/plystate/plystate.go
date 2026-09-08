@@ -119,6 +119,7 @@ type Instance struct {
 	PublishedPort *uint16           `json:"published_port"`
 	PublishedAddr string            `json:"published_addr"`
 	Domains       []string          `json:"domains"`
+	Volumes       []string          `json:"volumes"`
 
 	Alive bool `json:"-"`
 }
@@ -205,6 +206,18 @@ func List(p Paths) ([]Instance, error) {
 type App struct {
 	Name      string
 	Instances []Instance
+}
+
+// HasVolumes reports whether any instance declares a volume — i.e. whether
+// there is data to snapshot. A stateless app (read-only rootfs, throwaway
+// scratch) has none, and the UI offers it no snapshot controls.
+func (a App) HasVolumes() bool {
+	for _, i := range a.Instances {
+		if len(i.Volumes) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func (a App) Live() int {

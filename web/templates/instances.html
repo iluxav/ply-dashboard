@@ -80,7 +80,7 @@
 {{end}}
 
 {{define "snapshots"}}
-{{if or .Snapshots .Writable}}
+{{if or .Snapshots .App.HasVolumes}}
 <div class="mt-6 border-t border-edge/60 pt-3">
   <div class="flex items-center gap-3 text-xs">
     <span class="text-fade/50">snapshots</span>
