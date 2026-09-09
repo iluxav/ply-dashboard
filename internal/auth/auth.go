@@ -75,9 +75,33 @@ func Load(dir string) (*Auth, error) {
 	return a, nil
 }
 
+// syncLocked reconciles in-memory state with the file on disk, so the
+// documented reset — delete auth.json — takes effect on the next request
+// with no restart. If the file vanished, drop back into setup and mint a
+// fresh token (the anti-race gate still holds); if an account appeared
+// out-of-band, adopt it. Caller holds a.mu.
+func (a *Auth) syncLocked() {
+	_, err := os.Stat(a.path)
+	switch {
+	case os.IsNotExist(err) && a.rec != nil:
+		a.rec = nil
+		a.setupToken = randomToken(16)
+		fmt.Printf("ply-dashboard: auth file removed — create the account with setup token: %s\n", a.setupToken)
+	case err == nil && a.rec == nil:
+		if raw, e := os.ReadFile(a.path); e == nil {
+			var rec record
+			if json.Unmarshal(raw, &rec) == nil {
+				a.rec = &rec
+				a.setupToken = ""
+			}
+		}
+	}
+}
+
 func (a *Auth) NeedsSetup() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.syncLocked()
 	return a.rec == nil
 }
 
@@ -85,6 +109,7 @@ func (a *Auth) NeedsSetup() bool {
 func (a *Auth) Setup(token, user, password string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.syncLocked()
 	if a.rec != nil {
 		return fmt.Errorf("already configured")
 	}
@@ -158,6 +183,7 @@ func (a *Auth) Login(remoteAddr, user, password string) (string, error) {
 	}
 	a.attempts[ip] = append(recent, now)
 
+	a.syncLocked()
 	if a.rec == nil {
 		return "", fmt.Errorf("not configured")
 	}
@@ -175,6 +201,7 @@ func (a *Auth) Login(remoteAddr, user, password string) (string, error) {
 func (a *Auth) Valid(r *http.Request) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.syncLocked()
 	if a.rec == nil {
 		return false
 	}
