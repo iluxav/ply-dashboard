@@ -247,6 +247,7 @@ func main() {
 	mux.HandleFunc("GET /notify", s.guard(s.notifyPage))
 	mux.HandleFunc("POST /notify/save", s.guard(s.notifySave))
 	mux.HandleFunc("POST /notify/test", s.guard(s.notifyTest))
+	mux.HandleFunc("POST /secret/seal", s.guard(s.sealAction))
 	mux.HandleFunc("POST /deploy", s.guard(s.deployCreate))
 	mux.HandleFunc("POST /deploy/{name}/delete", s.guard(s.deployDelete))
 	mux.HandleFunc("GET /partials/deployments", s.guard(s.deploymentsPartial))
@@ -334,6 +335,10 @@ type pageData struct {
 	DeployAvailable bool
 	Fleet           *plystate.DeployStatus
 	RegistryApps    []registry.App
+
+	SealAvailable bool
+	SealedBlob    string
+	SealName      string
 
 	Notify         plystate.NotifyConfig
 	NotifyEvents   []string
@@ -671,6 +676,7 @@ func (s *server) notifyData() pageData {
 		Notify:         c,
 		NotifyEvents:   plystate.NotifyEvents,
 		NotifyWritable: plystate.NotifyWritable(s.paths),
+		SealAvailable:  plystate.SealAvailable(s.paths),
 		TgToken:        token,
 		TgChat:         chat,
 		OtherDests:     c.Others(),
@@ -700,6 +706,18 @@ func (s *server) notifySave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := formToConfig(r)
+	// "seal token" replaces the plaintext telegram destination with a value
+	// sealed for this host, so notify.toml can live in a repo. Sealed under
+	// the name `notify`, which ply's notifier unseals with.
+	if r.FormValue("seal") == "on" && plystate.SealAvailable(s.paths) {
+		for i, d := range c.To {
+			if strings.HasPrefix(d, "telegram:") && !plystate.IsSealed(d) {
+				if blob, err := plystate.Seal("notify", d, plystate.HostPub(s.paths)); err == nil {
+					c.To[i] = blob
+				}
+			}
+		}
+	}
 	data := s.notifyData()
 	if err := plystate.SaveNotify(s.paths, c); err != nil {
 		data.Error = err.Error()
@@ -740,6 +758,39 @@ func errText(err error) string {
 	return err.Error()
 }
 
+// sealAction seals name=value with the host public key and returns the
+// enc:v1: blob as a fragment — the private key never touches the dashboard,
+// so this creates sealed values and can never read one back.
+func (s *server) sealAction(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimSpace(r.FormValue("name"))
+	value := r.FormValue("value")
+	data := pageData{Authed: true, SealAvailable: plystate.SealAvailable(s.paths), SealName: name}
+	if !data.SealAvailable {
+		data.Error = "no host key to seal for — run `sudo ply setup` on the host (ply >= 0.1.93)"
+	} else if name == "" || value == "" {
+		data.Error = "a variable name and a value are required"
+	} else if !validEnvName(name) {
+		data.Error = "not an environment variable name (letters, digits, underscore)"
+	} else if blob, err := plystate.Seal(name, value, plystate.HostPub(s.paths)); err != nil {
+		data.Error = err.Error()
+	} else {
+		data.SealedBlob = blob
+	}
+	s.render(w, "deploy", "sealed", data)
+}
+
+func validEnvName(n string) bool {
+	if n == "" || (n[0] >= '0' && n[0] <= '9') {
+		return false
+	}
+	for _, c := range n {
+		if !(c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *server) renderDeploy(w http.ResponseWriter, tab, deployErr string) {
 	s.renderDeployWith(w, tab, deployErr, nil)
 }
@@ -761,6 +812,7 @@ func (s *server) renderDeployWith(w http.ResponseWriter, tab, deployErr string, 
 		DeployErr:       deployErr,
 		Fleet:           plystate.Fleet(s.paths),
 		FleetRepo:       plystate.FleetRepo(s.paths),
+		SealAvailable:   plystate.SealAvailable(s.paths),
 	}
 	for _, g := range data.Groups {
 		data.DeployCount += len(g.Items)

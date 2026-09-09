@@ -44,6 +44,12 @@
              class="bg-card border border-edge rounded px-2 py-1 text-ink font-mono">
     </div>
     <div class="text-fade/40 text-[11px] mt-1">from @BotFather; message the bot once, then use its chat id</div>
+    {{if .SealAvailable}}
+    <label class="flex items-center gap-2 text-fade/70 text-xs mt-2">
+      <input type="checkbox" name="seal" class="accent-accent">
+      <span>seal the token for this host (stored as <span class="text-fade">enc:v1:…</span>, safe to commit)</span>
+    </label>
+    {{end}}
   </div>
 
   <div>
