@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -52,7 +53,31 @@ func postJSON(url string, body []byte) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
+		// Surface the service's own reason — Telegram/Discord return a JSON
+		// `description` that says exactly what is wrong ("chat not found",
+		// "bot can't initiate conversation with a user"). A bare status code
+		// turned a wrong chat id into a long hunt.
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		if desc := jsonField(raw, "description"); desc != "" {
+			return fmt.Errorf("HTTP %d: %s", resp.StatusCode, desc)
+		}
+		if msg := jsonField(raw, "message"); msg != "" {
+			return fmt.Errorf("HTTP %d: %s", resp.StatusCode, msg)
+		}
 		return fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// jsonField pulls one string field out of a response body, or "" if the
+// body is not JSON or lacks it.
+func jsonField(raw []byte, field string) string {
+	var m map[string]any
+	if json.Unmarshal(raw, &m) != nil {
+		return ""
+	}
+	if v, ok := m[field].(string); ok {
+		return v
+	}
+	return ""
 }
