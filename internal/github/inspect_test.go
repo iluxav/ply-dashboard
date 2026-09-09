@@ -2,6 +2,7 @@ package github
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 )
@@ -47,8 +48,8 @@ func TestPresetsCoverEveryFramework(t *testing.T) {
 
 // / Network test — run explicitly: go test ./internal/github -run Live -live
 func TestLiveInspectPublicRepo(t *testing.T) {
-	if testing.Short() {
-		t.Skip("network")
+	if os.Getenv("PLY_LIVE_TESTS") == "" {
+		t.Skip("network — set PLY_LIVE_TESTS=1 to run (needs GitHub API access)")
 	}
 	insp, err := Inspect("https://github.com/iluxav/next-dummy", "")
 	if err != nil {
@@ -92,8 +93,8 @@ func TestParseAdvertisement(t *testing.T) {
 
 // / Network test: real refs advertisement against next-dummy.
 func TestLiveLsRemote(t *testing.T) {
-	if testing.Short() {
-		t.Skip("network")
+	if os.Getenv("PLY_LIVE_TESTS") == "" {
+		t.Skip("network — set PLY_LIVE_TESTS=1 to run (needs GitHub API access)")
 	}
 	sha, err := LsRemote("https://github.com/iluxav/next-dummy", "", "")
 	if err != nil || len(sha) != 40 {
@@ -107,8 +108,8 @@ func TestLiveLsRemote(t *testing.T) {
 
 // / Network test: the dashboard repo's latest release carries a ply image.
 func TestLiveImageRelease(t *testing.T) {
-	if testing.Short() {
-		t.Skip("network")
+	if os.Getenv("PLY_LIVE_TESTS") == "" {
+		t.Skip("network — set PLY_LIVE_TESTS=1 to run (needs GitHub API access)")
 	}
 	rel := latestImageRelease("iluxav/ply-dashboard", "")
 	if rel == nil {

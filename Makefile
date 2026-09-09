@@ -30,6 +30,10 @@ build: css
 test:
 	go vet ./... && go test ./...
 
+# live tests hit the real GitHub API — opt-in, so CI never flakes on a rate-limit 403
+test-live:
+	PLY_LIVE_TESTS=1 go test ./...
+
 # dev loop against the host's own ply state
 run: build
 	PORT=7070 ./ply-dashboard
