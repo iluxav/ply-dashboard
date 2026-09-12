@@ -1226,11 +1226,19 @@ func (s *server) sourceInspect(w http.ResponseWriter, r *http.Request) {
 		spec.Ref = insp.DefaultBranch
 		spec.Publish, gh.Publish = r.FormValue("publish"), r.FormValue("publish")
 	}
-	preset := github.PresetFor(form.Framework)
-	spec.Build, spec.Runtime = preset.Build, preset.Runtime
-	spec.Entrypoint, spec.Include, spec.Port = preset.Entrypoint, preset.Include, preset.Port
-	if spec.Publish == "" && preset.Port != "" {
-		spec.Publish = "internal:" + preset.Port
+	if insp.PlyComposition {
+		// The repo's ply.toml is a composition: the order is one line (repo=)
+		// and the host builds each service. No single-app preset fields.
+		spec.Composition = true
+		spec.Build, spec.Runtime, spec.Entrypoint, spec.Include, spec.Port = "", "", "", "", ""
+		form.Lane = "source"
+	} else {
+		preset := github.PresetFor(form.Framework)
+		spec.Build, spec.Runtime = preset.Build, preset.Runtime
+		spec.Entrypoint, spec.Include, spec.Port = preset.Entrypoint, preset.Include, preset.Port
+		if spec.Publish == "" && preset.Port != "" {
+			spec.Publish = "internal:" + preset.Port
+		}
 	}
 	spec.Repo = insp.CloneURL
 	gh.Repo = insp.Repo
@@ -1385,18 +1393,19 @@ func previewFor(form *sourceForm) string {
 
 func specFromForm(r *http.Request) plystate.SourceSpec {
 	return plystate.SourceSpec{
-		Name:       strings.TrimSpace(r.FormValue("name")),
-		Repo:       strings.TrimSpace(r.FormValue("repo")),
-		Ref:        strings.TrimSpace(r.FormValue("ref")),
-		Build:      strings.TrimSpace(r.FormValue("build")),
-		Runtime:    strings.TrimSpace(r.FormValue("runtime")),
-		Entrypoint: strings.TrimSpace(r.FormValue("entrypoint")),
-		Include:    strings.TrimSpace(r.FormValue("include")),
-		Port:       strings.TrimSpace(r.FormValue("port")),
-		Publish:    strings.TrimSpace(r.FormValue("publish")),
-		Domain:     strings.TrimSpace(r.FormValue("domain")),
-		Env:        r.FormValue("env"),
-		Manual:     r.FormValue("manual") == "1",
+		Name:        strings.TrimSpace(r.FormValue("name")),
+		Repo:        strings.TrimSpace(r.FormValue("repo")),
+		Ref:         strings.TrimSpace(r.FormValue("ref")),
+		Build:       strings.TrimSpace(r.FormValue("build")),
+		Runtime:     strings.TrimSpace(r.FormValue("runtime")),
+		Entrypoint:  strings.TrimSpace(r.FormValue("entrypoint")),
+		Include:     strings.TrimSpace(r.FormValue("include")),
+		Port:        strings.TrimSpace(r.FormValue("port")),
+		Publish:     strings.TrimSpace(r.FormValue("publish")),
+		Domain:      strings.TrimSpace(r.FormValue("domain")),
+		Env:         r.FormValue("env"),
+		Manual:      r.FormValue("manual") == "1",
+		Composition: r.FormValue("composition") == "1",
 	}
 }
 

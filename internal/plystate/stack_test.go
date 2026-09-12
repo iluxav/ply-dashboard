@@ -121,3 +121,51 @@ func TestDeployStackAppliesMemberOverrides(t *testing.T) {
 		t.Fatalf("expected verbatim spec:\n%s", verbatim)
 	}
 }
+
+// The new form: [package] identity + [[service]] members.
+func TestParsePackageComposition(t *testing.T) {
+	p := Paths{Deployments: t.TempDir()}
+	const spec = `[package]
+name = "todos"
+version = "0.1.0"
+
+[[service]]
+run = "postgres@17"
+name = "db"
+
+[[service]]
+run  = "git+https://github.com/iluxav/rm-server"
+name = "server"
+after = ["db"]
+`
+	view, err := ParseStack(p, spec)
+	if err != nil || view == nil {
+		t.Fatalf("parse: %v (view=%v)", err, view)
+	}
+	if view.Name != "todos" || view.Version != "0.1.0" {
+		t.Fatalf("identity from [package]: %+v", view)
+	}
+	if len(view.Members) != 2 || view.Members[0].Name != "db" || view.Members[1].Name != "server" {
+		t.Fatalf("members: %+v", view.Members)
+	}
+}
+
+// A file must not carry both [[service]] and [[app]].
+func TestParseStackBothArraysError(t *testing.T) {
+	_, err := ParseStack(Paths{}, "[[service]]\nrun = \"redis\"\n\n[[app]]\nrun = \"postgres@17\"\n")
+	if err == nil || !strings.Contains(err.Error(), "not both") {
+		t.Fatalf("expected a both-arrays error, got %v", err)
+	}
+}
+
+// Render (used only when the form edits a member) emits the new spelling.
+func TestRenderEmitsPackageAndService(t *testing.T) {
+	v := &StackView{Name: "todos", Members: []StackMember{{Run: "postgres@17", Name: "db"}}}
+	out := v.Render()
+	if !strings.Contains(out, "[package]") || !strings.Contains(out, "[[service]]") {
+		t.Fatalf("want [package] + [[service]], got:\n%s", out)
+	}
+	if strings.Contains(out, "[stack]") || strings.Contains(out, "[[app]]") {
+		t.Fatalf("must not emit legacy headers:\n%s", out)
+	}
+}

@@ -32,7 +32,12 @@ type Inspection struct {
 	Release       *Release // latest release carrying a .img for this arch, if any
 	FleetHosts    []string // hosts/<name>/ dirs — the repo is a fleet, not an app
 	StackToml     string   // repo's stack.toml content, if it carries one
-	StackName     string   // [stack] name from that file (repo name fallback)
+	StackName     string   // name from that file (repo name fallback)
+	// PlyComposition: the repo's ply.toml is itself a composition (it has
+	// [[service]]/[[app]]). This is what a host reads for a `repo=` order —
+	// one line deploys the whole set, the host builds each service. When set,
+	// the wizard offers a one-line repo= order, not the single-app form.
+	PlyComposition bool
 }
 
 // Release: the CI-image lane's offer — the latest release ships a ply
@@ -42,8 +47,15 @@ type Release struct {
 	Asset   string // app name parsed from <app>-<ver>-linux-<arch>.img
 }
 
-// [stack] name = "…" — the stack's own name, for the prefilled form.
+// name = "…" — the composition's own name (from [package] or the legacy
+// [stack] header), for the prefilled form.
 var stackName = regexp.MustCompile(`(?m)^\s*name\s*=\s*"([^"]+)"`)
+
+// isComposition: does this manifest carry service blocks? `[[service]]` is
+// the spelling; `[[app]]` is the legacy alias, still recognized.
+func isComposition(body string) bool {
+	return strings.Contains(body, "[[service]]") || strings.Contains(body, "[[app]]")
+}
 
 var repoPattern = regexp.MustCompile(
 	`^(?:https?://github\.com/|git@github\.com:|github\.com/)([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/?$`)
@@ -161,14 +173,21 @@ func (i *Inspection) probe(token string) {
 		return status, body
 	}
 	hasPly := false
-	if status, _ := raw("ply.toml"); status == http.StatusOK {
+	if status, body := raw("ply.toml"); status == http.StatusOK {
 		hasPly = true
 		i.Markers = append(i.Markers, "ply.toml")
+		// A ply.toml that carries [[service]] (or the legacy [[app]]) IS a
+		// composition: a host deploys the whole set from a one-line `repo=`
+		// order, reading THIS file (not a stack.toml) and building each
+		// service on the box.
+		if isComposition(string(body)) {
+			i.PlyComposition = true
+		}
 	}
 	// A repo shipping a stack.toml describes its whole deployment — the app
 	// plus the services it needs — so the page can offer the stack as one
 	// paste-ready unit instead of a single-app lane.
-	if status, body := raw("stack.toml"); status == http.StatusOK && strings.Contains(string(body), "[[app]]") {
+	if status, body := raw("stack.toml"); status == http.StatusOK && isComposition(string(body)) {
 		i.StackToml = string(body)
 		i.StackName = strings.TrimSuffix(path.Base(i.Repo), ".git")
 		if m := stackName.FindStringSubmatch(i.StackToml); m != nil {
@@ -203,6 +222,9 @@ func (i *Inspection) probe(token string) {
 	}
 
 	switch {
+	case i.PlyComposition:
+		i.Framework = "ply"
+		i.Note = "this repo's ply.toml is a composition — the order is one line (repo=) and the host builds each service on the box; no per-app fields to fill"
 	case hasPly:
 		i.Framework = "ply"
 		i.Note = "the repo carries its own ply.toml — entrypoint/include come from it; add a build command only if artifacts must be compiled first"

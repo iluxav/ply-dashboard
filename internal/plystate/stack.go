@@ -1,6 +1,6 @@
 package plystate
 
-// Stack files, dashboard-side: parse a [[app]] stack toml into a view the
+// Stack files, dashboard-side: parse a [[service]] composition toml into a view the
 // deploy page can render as member cards, surface its $VAR holes as
 // required inputs, and land the collected values in the env file the stack
 // references. Parsing is read-only — the pasted text stays the truth and
@@ -18,10 +18,10 @@ import (
 )
 
 type StackView struct {
-	Name        string // [stack] name, or "" when unnamed
+	Name        string // [package] (or legacy [stack]) name, or "" when unnamed
 	Version     string
 	Description string
-	EnvFile     string // [stack] env_file as written, or ""
+	EnvFile     string // env_file as written, or ""
 	Members     []StackMember
 	Holes       []EnvHole // unique $VARs across member env/publish/domain, in order
 }
@@ -50,8 +50,8 @@ type EnvHole struct {
 
 var holePattern = regexp.MustCompile(`\$([A-Z_][A-Z0-9_]*)`)
 
-// ParseStack reads a stack toml. Returns nil (no error) when the text has
-// no [[app]] array — it's not a stack, someone else's problem.
+// ParseStack reads a composition toml. Returns nil (no error) when the text
+// has no [[service]] (or legacy [[app]]) array — it is not a composition.
 func ParseStack(p Paths, text string) (*StackView, error) {
 	// Loose probe first: `app = "name"` is the single-app deployment lane
 	// and must fall through as not-a-stack, not die on a type mismatch.
@@ -59,41 +59,61 @@ func ParseStack(p Paths, text string) (*StackView, error) {
 	if _, err := toml.Decode(text, &probe); err != nil {
 		return nil, fmt.Errorf("stack toml: %w", err)
 	}
-	if _, ok := probe["app"].([]map[string]any); !ok {
+	// A composition has `[[service]]` (or the legacy `[[app]]`); naming both
+	// in one file is an error, as ply-core does.
+	_, hasApp := probe["app"].([]map[string]any)
+	_, hasSvc := probe["service"].([]map[string]any)
+	if hasApp && hasSvc {
+		return nil, fmt.Errorf("a composition uses [[service]] OR the older [[app]] — not both in one file")
+	}
+	if !hasApp && !hasSvc {
 		return nil, nil
 	}
+	type memberDoc struct {
+		Run     string   `toml:"run"`
+		Name    string   `toml:"name"`
+		E       []string `toml:"e"`
+		Publish []string `toml:"publish"`
+		Domain  []string `toml:"domain"`
+		After   any      `toml:"after"` // ply accepts a string or a list
+		Volume  []string `toml:"volume"`
+		Scale   int      `toml:"scale"`
+	}
+	// Identity: `[package]` is the one header; `[stack]` is the legacy alias.
+	type identity struct {
+		Name        string `toml:"name"`
+		Version     string `toml:"version"`
+		Description string `toml:"description"`
+		EnvFile     string `toml:"env_file"`
+	}
 	var doc struct {
-		Stack struct {
-			Name        string `toml:"name"`
-			Version     string `toml:"version"`
-			Description string `toml:"description"`
-			EnvFile     string `toml:"env_file"`
-		} `toml:"stack"`
-		App []struct {
-			Run     string   `toml:"run"`
-			Name    string   `toml:"name"`
-			E       []string `toml:"e"`
-			Publish []string `toml:"publish"`
-			Domain  []string `toml:"domain"`
-			After   any      `toml:"after"` // ply accepts a string or a list
-			Volume  []string `toml:"volume"`
-			Scale   int      `toml:"scale"`
-		} `toml:"app"`
+		Package identity    `toml:"package"`
+		Stack   identity    `toml:"stack"`
+		Service []memberDoc `toml:"service"`
+		App     []memberDoc `toml:"app"`
 	}
 	if _, err := toml.Decode(text, &doc); err != nil {
 		return nil, fmt.Errorf("stack toml: %w", err)
 	}
-	if len(doc.App) == 0 {
+	members := doc.Service
+	if len(members) == 0 {
+		members = doc.App
+	}
+	if len(members) == 0 {
 		return nil, nil
 	}
+	id := doc.Stack
+	if _, ok := probe["package"].(map[string]any); ok {
+		id = doc.Package
+	}
 	view := &StackView{
-		Name:        doc.Stack.Name,
-		Version:     doc.Stack.Version,
-		Description: doc.Stack.Description,
-		EnvFile:     doc.Stack.EnvFile,
+		Name:        id.Name,
+		Version:     id.Version,
+		Description: id.Description,
+		EnvFile:     id.EnvFile,
 	}
 	seen := map[string]bool{}
-	for _, a := range doc.App {
+	for _, a := range members {
 		m := StackMember{
 			Run:     a.Run,
 			Name:    a.Name,
@@ -236,7 +256,7 @@ func DeployStackRef(p Paths, name, ref, spec string, values map[string]string) e
 			return err
 		}
 		if view == nil {
-			return fmt.Errorf("the published stack has no [[app]] blocks")
+			return fmt.Errorf("the published stack has no [[service]] blocks")
 		}
 		if view.EnvFile == "" {
 			return fmt.Errorf(
@@ -259,7 +279,7 @@ func DeployStack(p Paths, name, spec string, values map[string]string, overrides
 		return err
 	}
 	if view == nil {
-		return fmt.Errorf("that spec has no [[app]] blocks — paste it in the from-a-spec form instead")
+		return fmt.Errorf("that spec has no [[service]] blocks — paste it in the from-a-spec form instead")
 	}
 	rerender := false
 	for i := range view.Members {
@@ -296,7 +316,7 @@ func DeployStack(p Paths, name, spec string, values map[string]string, overrides
 // form actually edited something — untouched pastes reach disk verbatim.
 func (v *StackView) Render() string {
 	var b strings.Builder
-	b.WriteString("[stack]\n")
+	b.WriteString("[package]\n")
 	if v.Name != "" {
 		fmt.Fprintf(&b, "name = %q\n", v.Name)
 	}
@@ -310,7 +330,7 @@ func (v *StackView) Render() string {
 		fmt.Fprintf(&b, "env_file = %q\n", v.EnvFile)
 	}
 	for _, m := range v.Members {
-		b.WriteString("\n[[app]]\n")
+		b.WriteString("\n[[service]]\n")
 		fmt.Fprintf(&b, "run = %q\n", m.Run)
 		if m.Name != "" {
 			fmt.Fprintf(&b, "name = %q\n", m.Name)

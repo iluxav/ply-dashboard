@@ -125,11 +125,11 @@ func RewriteDeployment(p Paths, name, spec string) error {
 
 // A spec that could never converge: no source key and no [[app]] stack
 // blocks. Everything else is `ply reconcile`'s judgment call.
-var specShape = regexp.MustCompile(`(?m)^\s*(app|image|url|github|repo|stack)\s*=|^\s*\[\[app\]\]`)
+var specShape = regexp.MustCompile(`(?m)^\s*(app|image|url|github|repo|stack)\s*=|^\s*\[\[(service|app)\]\]`)
 
 func checkSpecShape(spec string) error {
 	if !specShape.MatchString(spec) {
-		return fmt.Errorf("spec needs one of app/image/url/github/repo/stack, or [[app]] stack blocks — nothing to deploy otherwise")
+		return fmt.Errorf("spec needs one of app/image/url/github/repo/stack, or [[service]] composition blocks — nothing to deploy otherwise")
 	}
 	return nil
 }
@@ -146,8 +146,8 @@ func writeSpec(p Paths, name, spec string) error {
 }
 
 // CreateRawDeployment writes a brand-new spec file verbatim — the "paste a
-// spec" lane: a single-app toml or a whole [[app]] stack (reconcile expands
-// stacks into one app per member). Refuses to clobber an existing
+// spec" lane: a single-app toml or a whole [[service]] composition (reconcile
+// expands compositions into one app per member). Refuses to clobber an existing
 // deployment; that one is edited in place on the on-this-host tab.
 func CreateRawDeployment(p Paths, name, spec string) error {
 	if !deployName.MatchString(name) {
@@ -420,6 +420,11 @@ type SourceSpec struct {
 	Manual     bool   // render auto = false: converge only on touch/deploy-now
 	Stack      string // grouping label (stacks render together)
 	After      string // comma-separated app names to wait healthy for
+	// Composition: the repo's ply.toml is a composition, so the order is
+	// just `repo=` (+ overrides) — the host builds every service from that
+	// ply.toml. No build/entrypoint/runtime/port: those are single-app fields
+	// reconcile would ignore.
+	Composition bool
 }
 
 // Render validates and returns the exact TOML the deployment file will
@@ -443,7 +448,7 @@ func (s SourceSpec) Render() (string, error) {
 		}
 		port = n
 	}
-	if strings.TrimSpace(s.Build) == "" && strings.TrimSpace(s.Entrypoint) == "" {
+	if !s.Composition && strings.TrimSpace(s.Build) == "" && strings.TrimSpace(s.Entrypoint) == "" {
 		return "", fmt.Errorf("need a build command, an entrypoint, or both — an empty spec builds nothing")
 	}
 
@@ -462,6 +467,19 @@ func (s SourceSpec) Render() (string, error) {
 	writeOpt("ref", s.Ref)
 	writeOpt("deploy_key", s.DeployKey)
 	writeOpt("token_file", s.TokenFile)
+	// A composition order is just repo= (+ overrides): the host reads the
+	// repo's ply.toml and builds every service. build/runtime/entrypoint/
+	// include/port are single-app fields reconcile would ignore, so omit them.
+	if s.Composition {
+		if v := strings.TrimSpace(s.Publish); v != "" {
+			fmt.Fprintf(&b, "publish = [%q]\n", v)
+		}
+		if v := strings.TrimSpace(s.Domain); v != "" {
+			fmt.Fprintf(&b, "domain = [%q]\n", v)
+		}
+		renderEnv(&b, s.Env)
+		return b.String(), nil
+	}
 	writeOpt("build", s.Build)
 	writeOpt("runtime", s.Runtime)
 	if fields := strings.Fields(s.Entrypoint); len(fields) > 0 {

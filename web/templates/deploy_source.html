@@ -44,13 +44,70 @@
     {{with .Insp.Note}}<div class="text-accent/90 mt-2">{{.}}</div>{{end}}
   </div>
 
+  {{if .Insp.PlyComposition}}
+  <form id="mode-single" class="mt-3 grid gap-2 text-xs md:grid-cols-2"
+        hx-post="/deploy/preview" hx-trigger="input delay:400ms" hx-target="#spec-preview" hx-swap="innerHTML">
+    <input type="hidden" name="inspected" value="1">
+    <input type="hidden" name="composition" value="1">
+    <input type="hidden" name="lane" value="source">
+    <input type="hidden" name="repo" value="{{.Spec.Repo}}">
+    <input type="hidden" name="token" value="{{.Token}}">
+
+    <div class="md:col-span-2 border border-green-900/60 rounded px-3 py-2 text-green-500/80">
+      this repo's <span class="font-mono">ply.toml</span> is a composition — the order is one line
+      (<span class="font-mono">repo=</span>) and the host clones it and builds every service on the box.
+      Fill only host-side overrides below.
+    </div>
+
+    <label class="grid gap-1">
+      <span class="text-fade/50">deployment name</span>
+      <input name="name" value="{{.Spec.Name}}" class="bg-card border border-edge rounded px-2 py-1.5 text-ink">
+    </label>
+    <label class="grid gap-1">
+      <span class="text-fade/50">branch / ref <span class="text-fade/35">(blank = remote HEAD)</span></span>
+      <input name="ref" value="{{.Spec.Ref}}" class="bg-card border border-edge rounded px-2 py-1.5 text-ink">
+    </label>
+    <label class="grid gap-1">
+      <span class="text-fade/50">publish (ADDR:PORT) <span class="text-fade/35">(optional override)</span></span>
+      <input name="publish" value="{{.Spec.Publish}}" placeholder="services publish their own ports" class="bg-card border border-edge rounded px-2 py-1.5 text-ink font-mono placeholder:text-fade/30">
+    </label>
+    <label class="grid gap-1">
+      <span class="text-fade/50">domain <span class="text-fade/35">(optional, via the edge)</span></span>
+      <input name="domain" value="{{.Spec.Domain}}" placeholder="app.example.com" class="bg-card border border-edge rounded px-2 py-1.5 text-ink font-mono placeholder:text-fade/30">
+    </label>
+    <label class="grid gap-1 md:col-span-2">
+      <span class="text-fade/50">env (KEY=VALUE per line) <span class="text-fade/35">(fills the composition's $VAR holes)</span></span>
+      <textarea name="env" rows="2" class="bg-card border border-edge rounded px-2 py-1.5 text-ink font-mono">{{.Spec.Env}}</textarea>
+    </label>
+
+    <label class="flex items-center gap-1.5 text-fade/50 md:col-span-2">
+      <input type="checkbox" name="manual" value="1" {{if .Spec.Manual}}checked{{end}}>
+      manual updates only — the timer leaves this deployment alone; deploy-now (or touching the file) still converges it
+    </label>
+
+    <div class="md:col-span-2">
+      <span class="text-fade/50">the file that will be written — deployments/<span class="text-fade">{{.Spec.Name}}.toml</span>:</span>
+      <div id="spec-preview" class="mt-1">
+        {{if .Preview}}<pre class="border border-edge rounded px-3 py-2 text-fade overflow-x-auto">{{.Preview}}</pre>
+        {{else}}<div class="text-fade/35">fill the form — the preview appears here</div>{{end}}
+      </div>
+    </div>
+
+    <div class="md:col-span-2">
+      <button hx-post="/deploy/source" hx-target="#source-wizard" hx-swap="outerHTML" hx-include="closest form"
+              class="bg-accent text-ground rounded px-4 py-1.5 font-bold hover:bg-accent-bright">create deployment</button>
+      <span class="text-fade/35 ml-3">systemd notices the file, `ply reconcile` clones the repo and builds every service on this host</span>
+    </div>
+  </form>
+  {{else}}
+
   {{if .Insp.StackToml}}
   <fieldset class="mt-3 flex gap-4 items-baseline text-xs">
     <span class="text-fade/50">deploy as:</span>
     <label class="flex items-center gap-1.5 text-ink/80">
       <input type="radio" name="dmode" value="stack" {{if ne .Mode "single"}}checked{{end}}
              onchange="document.getElementById('mode-stack').hidden=false;document.getElementById('mode-single').hidden=true">
-      stack <span class="text-green-500/80">(recommended — the repo ships one)</span>
+      composition <span class="text-green-500/80">(the repo ships a stack.toml)</span>
     </label>
     <label class="flex items-center gap-1.5 text-ink/80">
       <input type="radio" name="dmode" value="single" {{if eq .Mode "single"}}checked{{end}}
@@ -61,7 +118,7 @@
 
   <div id="mode-stack" {{if eq .Mode "single"}}hidden{{end}} class="mt-3 border border-green-900/60 rounded">
     <div class="px-3 py-2 text-xs text-green-500/80 border-b border-edge/60">
-      the stack{{with .Insp.StackName}} ({{.}}){{end}} as the repo ships it — every [[app]] member lands as its own app, wired
+      the stack{{with .Insp.StackName}} ({{.}}){{end}} as the repo ships it — every [[service]] member lands as its own app, wired
     </div>
     <form method="post" action="/deploy/stack" class="px-3 py-3 grid gap-3 text-xs">
       <label class="grid gap-1 md:w-64">
@@ -277,6 +334,7 @@
       <span class="text-fade/35 ml-3">{{if eq .Lane "release"}}`ply reconcile` downloads the release image and runs it{{else}}systemd notices the file, `ply reconcile` clones and builds on this host{{end}}</span>
     </div>
   </form>
+  {{end}}{{/* .Insp.PlyComposition */}}
   {{end}}
   {{end}}
 {{end}}
