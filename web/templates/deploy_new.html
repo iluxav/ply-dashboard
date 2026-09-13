@@ -101,18 +101,24 @@
       input.value=''; paint(); input.focus();
     }
   });
-  // connect-picker: the "exposes" dropdown shows what the SELECTED service
-  // actually exposes — built-in facts for any service, plus a database's
-  // connection params. No key magic: you name the env var your app reads.
+  // need-first wire: the "field" dropdown shows what the SELECTED service
+  // exposes — built-in facts for any service, plus a database's connection
+  // params; choosing "— a fixed value —" swaps it for a free-text value.
   var FACTS=['host','port','addr','base_url','name','version'],
       DBP=['url','password','database','user'];
   function fillFields(svc){
     var f=svc.closest('.js-picker'); if(!f) return;
-    var fld=f.querySelector('[name=field]'); if(!fld) return;
-    var opt=svc.selectedOptions[0], isdb=opt&&opt.dataset.db==='1',
-        list=isdb?DBP.concat(FACTS):FACTS, cur=fld.value;
-    fld.innerHTML=list.map(function(x){return '<option value="'+x+'">'+x+'</option>';}).join('');
-    if(list.indexOf(cur)>=0) fld.value=cur;
+    var fld=f.querySelector('[name=field]'), val=f.querySelector('[name=value]');
+    var opt=svc.selectedOptions[0], isValue=svc.value==='__value__', isdb=opt&&opt.dataset.db==='1';
+    if(fld){
+      fld.classList.toggle('hidden', isValue);
+      if(!isValue){
+        var list=isdb?DBP.concat(FACTS):FACTS, cur=fld.value;
+        fld.innerHTML=list.map(function(x){return '<option value="'+x+'">'+x+'</option>';}).join('');
+        if(list.indexOf(cur)>=0) fld.value=cur;
+      }
+    }
+    if(val) val.classList.toggle('hidden', !isValue);
   }
   function initPickers(root){
     (root||document).querySelectorAll('.js-picker [name=service]').forEach(function(s){

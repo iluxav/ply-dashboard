@@ -44,15 +44,9 @@
           <label class="flex flex-col gap-0.5"><span class="text-fade/50">volume</span>
             <input name="volume" value="{{.VolumeText}}" spellcheck="false" placeholder="data:/var/lib/…"
                    class="bg-card border border-edge/60 rounded px-2 py-1 text-ink font-mono focus:border-accent/50 outline-none"></label>
-          <label class="flex flex-col gap-0.5 col-span-2"><span class="text-fade/50">env · KEY=VALUE per line</span>
-            <textarea name="env" rows="2" spellcheck="false"
-                   class="bg-card border border-edge/60 rounded px-2 py-1 text-ink font-mono focus:border-accent/50 outline-none">{{.EnvText}}</textarea></label>
-          {{if .Expects}}
-          <div class="col-span-2 text-fade/40 text-[11px] -mt-0.5">
-            reads: {{range $j, $k := .Expects}}{{if $j}}, {{end}}<code class="text-fade/60">{{$k}}</code>{{end}}
-            <span class="text-fade/30">· from .env.example</span>
-          </div>
-          {{end}}
+          <label class="flex flex-col gap-0.5 col-span-2"><span class="text-fade/50">env · raw</span>
+            <textarea name="env" rows="1" spellcheck="false" placeholder="KEY=VALUE per line — the escape hatch; the wire rows below write here"
+                   class="bg-card border border-edge/60 rounded px-2 py-1 text-ink/80 font-mono focus:border-accent/50 outline-none">{{.EnvText}}</textarea></label>
           {{if .Others}}
           <div class="col-span-2 flex items-center gap-2 flex-wrap">
             <span class="text-fade/50">starts after</span>
@@ -72,36 +66,72 @@
         </div>
       </form>
 
-      {{if .Others}}
-      {{/* WIRE — kept OUTSIDE the edit form so its selects don't trigger a
-           card re-render. Ops read the autosaved draft and append. */}}
-      <div class="px-3 pb-2.5 pl-10 flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-edge/40 pt-2">
-        <details class="text-[11px]">
-          <summary class="text-fade/50 hover:text-fade cursor-pointer w-max select-none">+ connect a service</summary>
-          <form class="js-picker mt-1.5 flex flex-wrap items-end gap-1.5"
+      {{/* NEED-FIRST WIRE — driven by what the app reads (.env.example) ∪ what's
+           already set. Kept OUTSIDE the edit form so a select change doesn't
+           re-submit the card; each row's op reads the autosaved draft. */}}
+      {{if or $card.WireKeys $card.Others}}
+      <div class="px-3 pb-2.5 pl-10 border-t border-edge/40 pt-2 text-[11px]">
+        <div class="text-fade/50 mb-1.5">
+          wire — where does each value come from?{{if $card.Expects}} <span class="text-fade/30">· needs from .env.example</span>{{end}}
+        </div>
+        {{if $card.WireKeys}}
+        <div class="space-y-1">
+        {{range $key := $card.WireKeys}}
+          {{$val := index $card.EnvMap $key}}
+          <div class="flex items-center gap-2 flex-wrap">
+            <code class="text-ink w-48 shrink-0 truncate">{{$key}}</code>
+            {{if $val}}
+              <span class="text-fade/60 shrink-0">= <code class="text-fade/80">{{$val}}</code></span>
+              <button type="button" title="clear this mapping"
+                      hx-post="/deploy/draft/{{$.DraftID}}/card/{{$card.Index}}" hx-vals='{"op":"unmap","key":"{{$key}}"}'
+                      hx-target="#cart" hx-swap="outerHTML" class="text-fade/40 hover:text-red-400">×</button>
+            {{else}}
+              <span class="text-amber-500/70 shrink-0" title="no source yet">⚠</span>
+              <form class="js-picker flex items-center gap-1 flex-wrap"
+                    hx-post="/deploy/draft/{{$.DraftID}}/card/{{$card.Index}}" hx-target="#cart" hx-swap="outerHTML">
+                <input type="hidden" name="op" value="map">
+                <input type="hidden" name="key" value="{{$key}}">
+                <span class="text-fade/40">from</span>
+                <select name="service" class="bg-card border border-edge/60 rounded px-1 py-0.5 text-ink outline-none focus:border-accent/50">
+                  {{range $card.Others}}<option value="{{.Name}}" data-db="{{if .IsDB}}1{{end}}">{{.Name}}</option>{{end}}
+                  <option value="__value__">— a fixed value —</option>
+                </select>
+                <select name="field" class="js-wire-field bg-card border border-edge/60 rounded px-1 py-0.5 text-ink outline-none focus:border-accent/50">
+                  <option value="host">host</option><option value="port">port</option><option value="addr">addr</option><option value="base_url">base_url</option><option value="name">name</option><option value="version">version</option>
+                </select>
+                <input name="value" placeholder="a value" spellcheck="false"
+                       class="js-wire-value hidden bg-card border border-edge/60 rounded px-1 py-0.5 text-ink font-mono w-32 outline-none focus:border-accent/50">
+                <button class="text-accent/90 hover:text-accent border border-accent/40 hover:border-accent/70 rounded px-2 py-0.5">map</button>
+              </form>
+            {{end}}
+          </div>
+        {{end}}
+        </div>
+        {{end}}
+        {{if .Others}}
+        <details class="mt-1.5">
+          <summary class="text-fade/40 hover:text-fade cursor-pointer w-max select-none">+ map another env var</summary>
+          <form class="js-picker mt-1 flex items-center gap-1 flex-wrap"
                 hx-post="/deploy/draft/{{$.DraftID}}/card/{{.Index}}" hx-target="#cart" hx-swap="outerHTML">
-            <input type="hidden" name="op" value="addref">
-            <label class="flex flex-col gap-0.5"><span class="text-fade/40">service</span>
-              <select name="service" class="bg-card border border-edge/60 rounded px-1.5 py-1 text-ink outline-none focus:border-accent/50">
-                {{range .Others}}<option value="{{.Name}}" data-db="{{if .IsDB}}1{{end}}">{{.Name}}</option>{{end}}
-              </select></label>
-            <label class="flex flex-col gap-0.5"><span class="text-fade/40">it exposes</span>
-              <select name="field" class="bg-card border border-edge/60 rounded px-1.5 py-1 text-ink outline-none focus:border-accent/50">
-                <option value="host">host</option>
-                <option value="port">port</option>
-                <option value="addr">addr</option>
-                <option value="base_url">base_url</option>
-                <option value="name">name</option>
-                <option value="version">version</option>
-              </select></label>
-            <label class="flex flex-col gap-0.5"><span class="text-fade/40">as env var</span>
-              <input name="key" placeholder="the name your app reads" spellcheck="false" list="expects-{{.Index}}"
-                     class="bg-card border border-edge/60 rounded px-1.5 py-1 text-ink font-mono w-48 outline-none focus:border-accent/50"></label>
-            <button class="text-accent/90 hover:text-accent border border-accent/40 hover:border-accent/70 rounded px-2.5 py-1">insert</button>
+            <input type="hidden" name="op" value="map">
+            <input name="key" placeholder="ENV_VAR" list="unmapped-{{.Index}}" spellcheck="false"
+                   class="bg-card border border-edge/60 rounded px-1.5 py-0.5 text-ink font-mono w-40 outline-none focus:border-accent/50">
+            <span class="text-fade/40">from</span>
+            <select name="service" class="bg-card border border-edge/60 rounded px-1 py-0.5 text-ink outline-none focus:border-accent/50">
+              {{range .Others}}<option value="{{.Name}}" data-db="{{if .IsDB}}1{{end}}">{{.Name}}</option>{{end}}
+              <option value="__value__">— a fixed value —</option>
+            </select>
+            <select name="field" class="js-wire-field bg-card border border-edge/60 rounded px-1 py-0.5 text-ink outline-none focus:border-accent/50">
+              <option value="host">host</option><option value="port">port</option><option value="addr">addr</option><option value="base_url">base_url</option><option value="name">name</option><option value="version">version</option>
+            </select>
+            <input name="value" placeholder="a value" spellcheck="false"
+                   class="js-wire-value hidden bg-card border border-edge/60 rounded px-1 py-0.5 text-ink font-mono w-32 outline-none focus:border-accent/50">
+            <button class="text-accent/90 hover:text-accent border border-accent/40 hover:border-accent/70 rounded px-2 py-0.5">map</button>
           </form>
-          {{if .Expects}}<datalist id="expects-{{.Index}}">{{range .Expects}}<option value="{{.}}">{{end}}</datalist>{{end}}
-          <div class="text-fade/30 mt-1">these are the fields <span class="text-fade/55">that service</span> exposes — pick one and name the env var <span class="text-fade/55">your app</span> reads. writes <code>KEY={service.field}</code>; ply resolves it at deploy (a database's <code>url</code> carries its sealed password).</div>
+          <datalist id="unmapped-{{.Index}}">{{range .Expects}}<option value="{{.}}">{{end}}</datalist>
         </details>
+        {{end}}
+        <div class="text-fade/30 mt-1.5">a value from a service writes <code>KEY={service.field}</code> — ply resolves it at deploy (a database's <code>url</code> carries its sealed password).</div>
       </div>
       {{end}}
     </div>

@@ -164,33 +164,59 @@ func TestInjectPrefix(t *testing.T) {
 	}
 }
 
-func TestCartShowsWiringAffordances(t *testing.T) {
+func TestCartShowsNeedFirstWiring(t *testing.T) {
 	tmpl := builderTemplate(t, "web/templates/cart.html")
+	// server reads DATABASE_URL + PORT (from .env.example); DATABASE_URL is
+	// already mapped to postgres.url, PORT is not yet mapped.
 	data := pageData{DraftID: "d1", Cards: cardViews([]cart.Card{
 		{Name: "postgres", Kind: cart.KindRegistry, Ref: "postgres@17"},
-		{Name: "server", Kind: cart.KindRepo, Ref: "https://github.com/you/server", After: []string{"postgres"}},
+		{Name: "server", Kind: cart.KindRepo, Ref: "https://github.com/you/server",
+			After: []string{"postgres"}, Env: []string{"DATABASE_URL={postgres.url}"}},
 	}, cart.DraftMeta{"https://github.com/you/server": {"DATABASE_URL", "PORT"}})}
 	var b strings.Builder
 	if err := tmpl.ExecuteTemplate(&b, "cart", data); err != nil {
 		t.Fatal(err)
 	}
 	out := b.String()
-	// the server card offers the connect picker (service → exposed field →
-	// your env var) and the "injected free" hint naming POSTGRES_HOST/PORT.
-	// No auto-wiring button: the user maps what a service exposes themselves.
 	for _, want := range []string{
-		"+ connect a service", "it exposes", "the name your app reads",
-		"POSTGRES_HOST", "POSTGRES_PORT", `name="service"`,
-		// the .env.example "reads:" hint + the pick-or-type datalist
-		"reads:", "DATABASE_URL", ".env.example",
-		`list="expects-1"`, `<datalist id="expects-1"`,
+		"where does each value come from?", // the need-first header
+		"DATABASE_URL", "PORT",             // a row per needed var
+		"{postgres.url}",                    // the mapped row shows its value
+		`"op":"unmap","key":"DATABASE_URL"`, // …and a clear (×)
+		`name="op" value="map"`,             // the unmapped row's from-control
+		`name="service"`, `name="field"`, "— a fixed value —",
+		"+ map another env var",
+		"POSTGRES_HOST", "POSTGRES_PORT", // the after-injects hint stays
 	} {
 		if !strings.Contains(out, want) {
-			t.Fatalf("cart wiring missing %q in:\n%s", want, out)
+			t.Fatalf("need-first wiring missing %q in:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "+ DATABASE_URL") {
-		t.Fatalf("the auto DATABASE_URL button should be gone (no-auto-wiring)")
+	// the source-first picker is gone
+	for _, gone := range []string{"+ connect a service", "it exposes", "+ DATABASE_URL"} {
+		if strings.Contains(out, gone) {
+			t.Fatalf("old source-first affordance %q should be gone", gone)
+		}
+	}
+}
+
+func TestWireKeysUnionAndEnvMap(t *testing.T) {
+	// Expects order first, then Env-only keys; deduped.
+	got := wireKeys([]string{"DATABASE_URL", "PORT"}, []string{"DATABASE_URL={postgres.url}", "EXTRA=1"})
+	want := []string{"DATABASE_URL", "PORT", "EXTRA"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("wireKeys = %v, want %v", got, want)
+	}
+	m := envMap([]string{"DATABASE_URL={postgres.url}", "PORT=3000"})
+	if m["DATABASE_URL"] != "{postgres.url}" || m["PORT"] != "3000" {
+		t.Fatalf("envMap = %v", m)
+	}
+}
+
+func TestRemoveEnvKey(t *testing.T) {
+	got := removeEnvKey([]string{"A=1", "DATABASE_URL={db.url}", "B=2"}, "DATABASE_URL")
+	if strings.Join(got, ",") != "A=1,B=2" {
+		t.Fatalf("removeEnvKey = %v", got)
 	}
 }
 

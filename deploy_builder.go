@@ -81,14 +81,64 @@ type afterHint struct {
 type cardView struct {
 	Index       int
 	C           cart.Card
-	Others      []otherRef  // peers — for the `after` checkboxes and the connect picker
-	AfterInject []afterHint // this card's checked afters → the env prefixes ply injects
-	DBs         []string    // peer databases — for the DATABASE_URL one-click
-	Expects     []string    // env-var keys this app reads (from its .env.example)
-	EnvText     string      // env as KEY=VALUE lines
-	PublishText string      // publish, one per line
+	Others      []otherRef        // peers — for the `after` checkboxes and the wire "from" control
+	AfterInject []afterHint       // this card's checked afters → the env prefixes ply injects
+	DBs         []string          // peer databases (unused since the need-first invert; kept for tests)
+	Expects     []string          // env-var keys this app reads (from its .env.example)
+	WireKeys    []string          // need-first rows: Expects ∪ keys already set, in order
+	EnvMap      map[string]string // KEY→VALUE from the card's env (for the mapped/unmapped rows)
+	EnvText     string            // env as KEY=VALUE lines (the raw escape hatch)
+	PublishText string            // publish, one per line
 	DomainText  string
 	VolumeText  string
+}
+
+// envMap parses a card's `KEY=VALUE` env lines into a map.
+func envMap(env []string) map[string]string {
+	m := make(map[string]string, len(env))
+	for _, e := range env {
+		if k, v, ok := strings.Cut(e, "="); ok {
+			m[strings.TrimSpace(k)] = v
+		}
+	}
+	return m
+}
+
+// wireKeys is the ordered union that drives the need-first rows: what the app
+// declares it reads (.env.example), then any KEY already set that isn't
+// declared — so nothing the user mapped is ever hidden.
+func wireKeys(expects []string, env []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, k := range expects {
+		if k != "" && !seen[k] {
+			seen[k] = true
+			out = append(out, k)
+		}
+	}
+	for _, e := range env {
+		if k, _, ok := strings.Cut(e, "="); ok {
+			k = strings.TrimSpace(k)
+			if k != "" && !seen[k] {
+				seen[k] = true
+				out = append(out, k)
+			}
+		}
+	}
+	return out
+}
+
+// removeEnvKey drops any `KEY=…` line — the wire row's × (unmap).
+func removeEnvKey(env []string, key string) []string {
+	key = strings.TrimSpace(key)
+	out := make([]string, 0, len(env))
+	for _, e := range env {
+		if k, _, ok := strings.Cut(e, "="); ok && strings.TrimSpace(k) == key {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
 }
 
 // isDatabase reports whether a service (by its registry ref or its name) is a
@@ -265,6 +315,8 @@ func toCardView(c cart.Card, i int, all []cart.Card, meta cart.DraftMeta) cardVi
 	return cardView{
 		Index: i, C: c, Others: others, AfterInject: hints, DBs: dbs,
 		Expects:     meta[c.Ref],
+		WireKeys:    wireKeys(meta[c.Ref], c.Env),
+		EnvMap:      envMap(c.Env),
 		EnvText:     strings.Join(c.Env, "\n"),
 		PublishText: strings.Join(c.Publish, "\n"),
 		DomainText:  strings.Join(c.Domain, "\n"),
@@ -422,9 +474,20 @@ func (s *server) deployCardOp(w http.ResponseWriter, r *http.Request) {
 		if i < len(c.Cards)-1 {
 			c.Cards[i+1], c.Cards[i] = c.Cards[i], c.Cards[i+1]
 		}
-	case "addref": // the connect picker: append KEY={service.field}
+	case "map": // need-first wire: KEY ← a service's field, or a fixed value
+		key := strings.TrimSpace(r.FormValue("key"))
+		if key != "" {
+			if r.FormValue("service") == "__value__" {
+				c.Cards[i].Env = setEnvKey(c.Cards[i].Env, key, strings.TrimSpace(r.FormValue("value")))
+			} else {
+				addEnvRef(&c.Cards[i], r.FormValue("service"), r.FormValue("field"), key)
+			}
+		}
+	case "unmap": // the wire row's × — clear that key
+		c.Cards[i].Env = removeEnvKey(c.Cards[i].Env, r.FormValue("key"))
+	case "addref": // legacy alias of map(ref) — kept for any old callers/tests
 		addEnvRef(&c.Cards[i], r.FormValue("service"), r.FormValue("field"), r.FormValue("key"))
-	case "usedb": // the DATABASE_URL one-click
+	case "usedb": // the DATABASE_URL one-click (unwired since the invert; kept)
 		useDatabase(&c.Cards[i], r.FormValue("db"))
 	default: // edit
 		edited := parseCardForm(r)
