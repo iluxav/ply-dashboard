@@ -270,6 +270,14 @@ func main() {
 	mux.HandleFunc("POST /deploy/source", s.guard(s.sourceCreate))
 	mux.HandleFunc("POST /deploy/raw", s.guard(s.deployRaw))
 	mux.HandleFunc("POST /deploy/stack", s.guard(s.deployStackCreate))
+	// the deploy BUILDER (the cart) — assemble 1..N services, wire, deploy
+	mux.HandleFunc("GET /deploy/new", s.guard(s.deployNewPage))
+	mux.HandleFunc("POST /deploy/detect", s.guard(s.deployDetect))
+	mux.HandleFunc("POST /deploy/draft/{id}/add", s.guard(s.deployCartAdd))
+	mux.HandleFunc("POST /deploy/draft/{id}/card/{i}", s.guard(s.deployCardOp))
+	mux.HandleFunc("POST /deploy/draft/{id}/name", s.guard(s.deployCartName))
+	mux.HandleFunc("GET /deploy/draft/{id}/recipe", s.guard(s.deployCartRecipe))
+	mux.HandleFunc("POST /deploy/draft/{id}/deploy", s.guard(s.deployCartDeploy))
 
 	log.Printf("ply-dashboard %s — listening on :%s (state: %s)", version, port, paths.State)
 	log.Fatal(http.ListenAndServe(":"+port, mux))
@@ -287,23 +295,31 @@ func (s *server) parseTemplates() {
 		"defaultPublish": registry.DefaultPublish,
 		"freshOf":        s.fresh.Of,
 		"historyOf":      s.historyOf,
+		"srcicon":        srcIconSVG,
+		"srcbadge":       srcBadge,
+		"inc":            inc,
+		"has":            hasStr,
 	}
 	page := func(files ...string) *template.Template {
 		paths := append([]string{"web/templates/base.html"}, files...)
 		return template.Must(template.New("base.html").Funcs(funcs).ParseFS(webFS, paths...))
 	}
 	s.pages = map[string]*template.Template{
-		"index":  page("web/templates/index.html", "web/templates/apps_table.html", "web/templates/events.html"),
-		"app":    page("web/templates/app.html", "web/templates/instances.html", "web/templates/logs.html", "web/templates/events.html"),
-		"deploy": page("web/templates/deploy.html", "web/templates/deployments.html", "web/templates/deploy_source.html"),
-		"notify": page("web/templates/notify.html"),
-		"login":  page("web/templates/login.html"),
-		"setup":  page("web/templates/setup.html"),
+		"index":      page("web/templates/index.html", "web/templates/apps_table.html", "web/templates/events.html"),
+		"app":        page("web/templates/app.html", "web/templates/instances.html", "web/templates/logs.html", "web/templates/events.html"),
+		"deploy":     page("web/templates/deploy.html", "web/templates/deployments.html", "web/templates/deploy_source.html"),
+		"deploy_new": page("web/templates/deploy_new.html", "web/templates/cart.html", "web/templates/detected.html", "web/templates/recipe.html"),
+		"notify":     page("web/templates/notify.html"),
+		"login":      page("web/templates/login.html"),
+		"setup":      page("web/templates/setup.html"),
 		// standalone partials for htmx polling
 		"apps_table":    template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/apps_table.html")),
 		"instances":     template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/instances.html")),
 		"logs":          template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/logs.html")),
 		"deployments":   template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/deployments.html")),
+		"cart":          template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/cart.html")),
+		"detected":      template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/detected.html")),
+		"recipe":        template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/recipe.html")),
 		"deploy_source": template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/deploy_source.html")),
 		"events":        template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/events.html")),
 		"logpane":       template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/logpane.html")),
@@ -364,6 +380,13 @@ type pageData struct {
 	EnvName     string
 	EnvContent  string
 	EnvRefs     []string
+
+	// deploy builder (the cart)
+	DraftID    string
+	CartName   string
+	Cards      []cardView
+	Detected   *detectedView
+	RecipeTOML string
 }
 
 // sourceForm is the from-source wizard's state: inspection result plus the

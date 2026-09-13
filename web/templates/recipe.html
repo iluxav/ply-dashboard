@@ -1,0 +1,8 @@
+{{define "recipe"}}
+{{if .RecipeTOML}}
+<pre class="mt-2 bg-card border border-edge/60 rounded px-3 py-2 text-fade/80 text-xs overflow-x-auto whitespace-pre">{{.RecipeTOML}}</pre>
+<div class="text-fade/35 text-[11px] mt-0.5">the exact deployment file · reconcile applies it</div>
+{{else}}
+<div class="mt-2 text-fade/40 text-xs">add a service to see the file this writes</div>
+{{end}}
+{{end}}

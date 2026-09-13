@@ -36,6 +36,7 @@
 <div class="flex items-center gap-2 mb-3">
   <h2 class="text-accent/80 text-[10px] uppercase tracking-wider">deployments on this host</h2>
   {{template "helplink" "host"}}
+  <a href="/deploy/new" class="ml-auto text-xs text-accent hover:text-ink border border-edge rounded px-2.5 py-1">+ new deployment</a>
 </div>
 <div hx-get="/partials/deployments" hx-trigger="every 3s" hx-swap="innerHTML">
   {{template "deployments" .}}

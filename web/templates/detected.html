@@ -1,0 +1,50 @@
+{{define "detected"}}
+{{with .Detected}}
+{{if eq .Kind "empty"}}
+{{else if eq .Kind "error"}}
+  <div class="border border-red-900/60 rounded px-3 py-2 text-red-400 text-xs">{{.Note}}</div>
+{{else if eq .Kind "docker"}}
+  <div class="border border-edge rounded px-3 py-2 text-fade/60 text-xs flex items-center gap-2">
+    <span class="text-fade/50">{{srcicon "docker"}}</span><span>{{.Note}}</span>
+  </div>
+{{else if eq .Kind "registry"}}
+  {{if .Matches}}
+  <div class="border border-edge rounded bg-card/40 divide-y divide-edge/50 overflow-hidden">
+  {{range .Matches}}
+    <form hx-post="/deploy/draft/{{$.DraftID}}/add" hx-target="#cart" hx-swap="outerHTML"
+          class="flex items-center gap-2 px-3 py-2 hover:bg-card/60">
+      <span class="text-accent shrink-0">{{srcicon "registry"}}</span>
+      <span class="text-ink font-bold">{{.Ref}}</span>
+      <span class="text-fade/40 text-xs truncate flex-1">{{.Description}}</span>
+      <select name="version" class="bg-card border border-edge/60 rounded px-1.5 py-0.5 text-xs text-ink outline-none">
+        {{range .Versions}}<option>{{.}}</option>{{end}}
+      </select>
+      <input type="hidden" name="reftmpl" value="{{.Ref}}">
+      <button class="text-accent hover:text-ground hover:bg-accent border border-edge rounded px-2.5 py-1 text-xs shrink-0">add</button>
+    </form>
+  {{end}}
+  </div>
+  {{else}}
+  <div class="text-fade/40 text-xs px-1 py-2">{{.Note}}</div>
+  {{end}}
+{{else}}
+  {{/* repo or image — a prefilled preview card + add */}}
+  <form hx-post="/deploy/draft/{{$.DraftID}}/add" hx-target="#cart" hx-swap="outerHTML"
+        class="border border-accent/40 rounded bg-card/40 px-3 py-2.5">
+    <div class="flex items-center gap-2">
+      <span class="text-accent shrink-0">{{srcicon .Kind}}</span>
+      <input name="name" value="{{.Card.Name}}" spellcheck="false"
+             class="bg-transparent text-ink font-bold w-40 outline-none border-b border-edge/40 focus:border-accent/60">
+      <span class="text-fade/40 text-xs truncate flex-1">{{srcbadge .Card.Kind}} · {{.Card.Ref}}</span>
+      <button class="bg-accent/90 hover:bg-accent text-ground font-bold rounded px-3 py-1 text-xs shrink-0">add to deployment</button>
+    </div>
+    {{with .Note}}<div class="text-fade/50 text-xs mt-1.5 leading-snug">{{.}}</div>{{end}}
+    <input type="hidden" name="kind" value="{{.Card.Kind}}">
+    <input type="hidden" name="ref" value="{{.Card.Ref}}">
+    <input type="hidden" name="build" value="{{.Card.Build}}">
+    <input type="hidden" name="runtime" value="{{.Card.Runtime}}">
+    <input type="hidden" name="publish" value="{{range .Card.Publish}}{{.}} {{end}}">
+  </form>
+{{end}}
+{{end}}
+{{end}}

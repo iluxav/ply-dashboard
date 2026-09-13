@@ -1,0 +1,107 @@
+{{define "title"}}ply · new deployment{{end}}
+{{define "crumb"}}{{end}}
+
+{{define "content"}}
+{{if not .DeployAvailable}}
+<div class="text-fade/50 py-10 text-center text-xs">
+  the deployments dir isn't granted (or writable) — run the dashboard with
+  <span class="text-fade">--grant-links</span> on a host prepared by
+  <span class="text-fade">sudo ply setup --edge</span>
+</div>
+{{else}}
+
+<div class="flex items-center justify-between mb-6">
+  <h1 class="text-ink text-base">new deployment</h1>
+  <a href="/deploy" class="text-fade/50 hover:text-ink text-xs">✕ close</a>
+</div>
+
+{{with .Error}}<div class="text-red-400 text-xs mb-4 border border-red-900/60 rounded px-3 py-2">{{.}}</div>{{end}}
+
+<!-- OMNIBOX — one input, live source detection -->
+<div class="mb-6">
+  <div class="text-accent/70 text-[10px] uppercase tracking-wider mb-2">add a service</div>
+  <form id="omni" hx-post="/deploy/detect" hx-target="#detected" hx-swap="innerHTML" class="relative">
+    <input type="hidden" name="draft" value="{{.DraftID}}">
+    <input type="hidden" name="token" id="omni-token">
+    <span id="omni-icon" class="absolute left-3 top-1/2 -translate-y-1/2 text-fade/40 pointer-events-none"></span>
+    <input id="omni-input" name="input" autocomplete="off" autofocus spellcheck="false"
+           placeholder="paste a repo URL, or search the registry (postgres, redis…)"
+           class="w-full bg-card border border-edge rounded pl-10 pr-24 py-2.5 text-ink font-mono focus:border-accent/60 outline-none">
+    <span id="omni-label" class="absolute right-11 top-1/2 -translate-y-1/2 text-fade/40 text-[11px] pointer-events-none"></span>
+    <button title="detect" class="absolute right-2 top-1/2 -translate-y-1/2 text-accent hover:text-ink px-2 py-1">→</button>
+  </form>
+  <details class="mt-1.5">
+    <summary class="text-fade/35 hover:text-fade/60 text-[11px] cursor-pointer w-max">private repo? add a token</summary>
+    <input id="omni-tok" placeholder="fine-grained PAT · Contents: read"
+           oninput="document.getElementById('omni-token').value=this.value"
+           class="mt-1 w-full bg-card border border-edge/60 rounded px-2 py-1 text-xs text-ink font-mono focus:border-accent/50 outline-none">
+  </details>
+  <div id="detected" class="mt-2"></div>
+</div>
+
+<!-- CART -->
+{{template "cart" .}}
+
+<!-- FOOTER — name + raw + deploy -->
+<form method="post" action="/deploy/draft/{{.DraftID}}/deploy"
+      class="mt-8 flex items-center justify-between gap-3 border-t border-edge/60 pt-4">
+  <label class="flex items-center gap-2 text-xs text-fade/60">
+    name
+    <input name="name" value="{{.CartName}}" placeholder="my-app" spellcheck="false"
+           class="bg-card border border-edge rounded px-2 py-1.5 text-ink w-44 focus:border-accent/60 outline-none">
+  </label>
+  <div class="flex items-center gap-3">
+    <button type="button" class="text-fade/50 hover:text-fade text-xs"
+            hx-get="/deploy/draft/{{.DraftID}}/recipe" hx-target="#raw" hx-swap="innerHTML">raw ⌄</button>
+    <button class="bg-accent/90 hover:bg-accent text-ground font-bold rounded px-4 py-2 text-sm">deploy · reconcile applies it</button>
+  </div>
+</form>
+<div id="raw"></div>
+
+<script>
+(function(){
+  const ICONS = {
+    repo:     '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>',
+    registry: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4.27 9 5.15"/><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>',
+    image:    '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" x2="2" y1="12" y2="12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><line x1="6" x2="6.01" y1="16" y2="16"/><line x1="10" x2="10.01" y1="16" y2="16"/></svg>',
+    docker:   '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>',
+    search:   '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>',
+  };
+  const LABELS = {
+    repo:'GitHub repo · builds on this host', registry:'registry · press → to search',
+    image:'image file', docker:'Docker image · import soon', search:'',
+  };
+  function classify(v){
+    v=(v||'').trim();
+    if(!v) return 'search';
+    if(v.startsWith('docker://')) return 'docker';
+    if(v.endsWith('.img')) return 'image';
+    if(v.includes('github.com')||v.startsWith('git@')||v.endsWith('.git')) return 'repo';
+    if(/^https?:\/\//.test(v)) return 'repo';
+    var host=v.split('/')[0];
+    if(host.indexOf('.')>=0) return 'repo';
+    if(/^[a-z0-9][a-z0-9._@/-]*$/i.test(v)) return 'registry';
+    return 'repo';
+  }
+  var input=document.getElementById('omni-input'),
+      icon=document.getElementById('omni-icon'),
+      label=document.getElementById('omni-label');
+  function paint(){
+    var k=classify(input.value);
+    icon.innerHTML=ICONS[k]||ICONS.search;
+    icon.className='absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none '+(k==='search'?'text-fade/40':'text-accent');
+    label.textContent=LABELS[k]||'';
+  }
+  var t; input.addEventListener('input', function(){ clearTimeout(t); t=setTimeout(paint,150); });
+  paint();
+  // after a service is added the cart is swapped — clear the omnibox + preview
+  document.body.addEventListener('htmx:afterSwap', function(e){
+    if(e.target && e.target.id==='cart'){
+      var d=document.getElementById('detected'); if(d) d.innerHTML='';
+      input.value=''; paint(); input.focus();
+    }
+  });
+})();
+</script>
+{{end}}
+{{end}}
