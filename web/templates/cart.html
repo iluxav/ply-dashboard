@@ -12,52 +12,101 @@
   <div class="space-y-2">
   {{range .Cards}}
     {{$card := .}}
-    <form class="border border-edge rounded bg-card/40 px-3 py-2.5"
-          hx-post="/deploy/draft/{{$.DraftID}}/card/{{.Index}}" hx-target="#cart" hx-swap="outerHTML"
-          hx-trigger="change delay:250ms">
-      <input type="hidden" name="op" value="edit">
-      <div class="flex items-center gap-2">
-        <span class="text-fade/35 text-xs w-4 text-right">{{inc .Index}}</span>
-        <span class="text-accent shrink-0">{{srcicon .C.Kind}}</span>
-        <input name="name" value="{{.C.Name}}" spellcheck="false"
-               class="bg-transparent text-ink font-bold w-32 outline-none border-b border-transparent focus:border-accent/50">
-        <span class="text-fade/40 text-xs truncate flex-1">{{srcbadge .C.Kind}} · {{.C.Ref}}</span>
-        <span class="flex items-center gap-0.5 text-fade/40 shrink-0">
-          <button type="button" title="move up"   hx-post="/deploy/draft/{{$.DraftID}}/card/{{.Index}}" hx-vals='{"op":"up"}'     hx-target="#cart" hx-swap="outerHTML" class="hover:text-ink px-1">↑</button>
-          <button type="button" title="move down" hx-post="/deploy/draft/{{$.DraftID}}/card/{{.Index}}" hx-vals='{"op":"down"}'   hx-target="#cart" hx-swap="outerHTML" class="hover:text-ink px-1">↓</button>
-          <button type="button" title="remove"    hx-post="/deploy/draft/{{$.DraftID}}/card/{{.Index}}" hx-vals='{"op":"remove"}' hx-target="#cart" hx-swap="outerHTML" class="hover:text-red-400 px-1">✕</button>
-        </span>
-      </div>
-      <div class="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs pl-10 mt-2">
-        {{if eq .C.Kind "repo"}}
-        <label class="flex flex-col gap-0.5 col-span-2"><span class="text-fade/50">build</span>
-          <input name="build" value="{{.C.Build}}" spellcheck="false" placeholder="blank = auto-detected (Next.js / a ply.toml)"
-                 class="bg-card border border-edge/60 rounded px-2 py-1 text-ink font-mono focus:border-accent/50 outline-none"></label>
-        {{end}}
-        <label class="flex flex-col gap-0.5"><span class="text-fade/50">publish</span>
-          <input name="publish" value="{{.PublishText}}" spellcheck="false" placeholder="internal:3000 · or 8080:3000"
-                 class="bg-card border border-edge/60 rounded px-2 py-1 text-ink font-mono focus:border-accent/50 outline-none"></label>
-        <label class="flex flex-col gap-0.5"><span class="text-fade/50">domain</span>
-          <input name="domain" value="{{.DomainText}}" spellcheck="false" placeholder="app.example.com"
-                 class="bg-card border border-edge/60 rounded px-2 py-1 text-ink font-mono focus:border-accent/50 outline-none"></label>
-        <label class="flex flex-col gap-0.5"><span class="text-fade/50">volume</span>
-          <input name="volume" value="{{.VolumeText}}" spellcheck="false" placeholder="data:/var/lib/…"
-                 class="bg-card border border-edge/60 rounded px-2 py-1 text-ink font-mono focus:border-accent/50 outline-none"></label>
-        <label class="flex flex-col gap-0.5"><span class="text-fade/50">env · KEY=VALUE per line</span>
-          <textarea name="env" rows="2" spellcheck="false"
-                 class="bg-card border border-edge/60 rounded px-2 py-1 text-ink font-mono focus:border-accent/50 outline-none">{{.EnvText}}</textarea></label>
-        {{if .Others}}
-        <div class="col-span-2 flex items-center gap-2 flex-wrap">
-          <span class="text-fade/50">starts after</span>
-          {{range .Others}}
-          <label class="inline-flex items-center gap-1 text-fade/70 hover:text-ink">
-            <input type="checkbox" name="after" value="{{.}}" {{if has $card.C.After .}}checked{{end}} class="accent-orange-500">{{.}}
-          </label>
+    <div class="border border-edge rounded bg-card/40">
+      <form class="px-3 py-2.5"
+            hx-post="/deploy/draft/{{$.DraftID}}/card/{{.Index}}" hx-target="#cart" hx-swap="outerHTML"
+            hx-trigger="change delay:250ms">
+        <input type="hidden" name="op" value="edit">
+        <div class="flex items-center gap-2">
+          <span class="text-fade/35 text-xs w-4 text-right">{{inc .Index}}</span>
+          <span class="text-accent shrink-0">{{srcicon .C.Kind}}</span>
+          <input name="name" value="{{.C.Name}}" spellcheck="false"
+                 class="bg-transparent text-ink font-bold w-32 outline-none border-b border-transparent focus:border-accent/50">
+          <span class="text-fade/40 text-xs truncate flex-1">{{srcbadge .C.Kind}} · {{.C.Ref}}</span>
+          <span class="flex items-center gap-0.5 text-fade/40 shrink-0">
+            <button type="button" title="move up"   hx-post="/deploy/draft/{{$.DraftID}}/card/{{.Index}}" hx-vals='{"op":"up"}'     hx-target="#cart" hx-swap="outerHTML" class="hover:text-ink px-1">↑</button>
+            <button type="button" title="move down" hx-post="/deploy/draft/{{$.DraftID}}/card/{{.Index}}" hx-vals='{"op":"down"}'   hx-target="#cart" hx-swap="outerHTML" class="hover:text-ink px-1">↓</button>
+            <button type="button" title="remove"    hx-post="/deploy/draft/{{$.DraftID}}/card/{{.Index}}" hx-vals='{"op":"remove"}' hx-target="#cart" hx-swap="outerHTML" class="hover:text-red-400 px-1">✕</button>
+          </span>
+        </div>
+        <div class="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs pl-10 mt-2">
+          {{if eq .C.Kind "repo"}}
+          <label class="flex flex-col gap-0.5 col-span-2"><span class="text-fade/50">build</span>
+            <input name="build" value="{{.C.Build}}" spellcheck="false" placeholder="blank = auto-detected (Next.js / a ply.toml)"
+                   class="bg-card border border-edge/60 rounded px-2 py-1 text-ink font-mono focus:border-accent/50 outline-none"></label>
+          {{end}}
+          <label class="flex flex-col gap-0.5"><span class="text-fade/50">publish</span>
+            <input name="publish" value="{{.PublishText}}" spellcheck="false" placeholder="internal:3000 · or 8080:3000"
+                   class="bg-card border border-edge/60 rounded px-2 py-1 text-ink font-mono focus:border-accent/50 outline-none"></label>
+          <label class="flex flex-col gap-0.5"><span class="text-fade/50">domain</span>
+            <input name="domain" value="{{.DomainText}}" spellcheck="false" placeholder="app.example.com"
+                   class="bg-card border border-edge/60 rounded px-2 py-1 text-ink font-mono focus:border-accent/50 outline-none"></label>
+          <label class="flex flex-col gap-0.5"><span class="text-fade/50">volume</span>
+            <input name="volume" value="{{.VolumeText}}" spellcheck="false" placeholder="data:/var/lib/…"
+                   class="bg-card border border-edge/60 rounded px-2 py-1 text-ink font-mono focus:border-accent/50 outline-none"></label>
+          <label class="flex flex-col gap-0.5 col-span-2"><span class="text-fade/50">env · KEY=VALUE per line</span>
+            <textarea name="env" rows="2" spellcheck="false"
+                   class="bg-card border border-edge/60 rounded px-2 py-1 text-ink font-mono focus:border-accent/50 outline-none">{{.EnvText}}</textarea></label>
+          {{if .Others}}
+          <div class="col-span-2 flex items-center gap-2 flex-wrap">
+            <span class="text-fade/50">starts after</span>
+            {{range .Others}}
+            <label class="inline-flex items-center gap-1 text-fade/70 hover:text-ink">
+              <input type="checkbox" name="after" value="{{.Name}}" {{if has $card.C.After .Name}}checked{{end}} class="accent-orange-500">{{.Name}}
+            </label>
+            {{end}}
+          </div>
+          {{if .AfterInject}}
+          <div class="col-span-2 text-fade/40 text-[11px] pl-1">
+            ↳ injected free at runtime:
+            {{range .AfterInject}}<code class="text-fade/60">{{.Prefix}}_HOST</code>, <code class="text-fade/60">{{.Prefix}}_PORT</code>&nbsp;&nbsp;{{end}}
+          </div>
+          {{end}}
           {{end}}
         </div>
+      </form>
+
+      {{if .Others}}
+      {{/* WIRE — kept OUTSIDE the edit form so its selects don't trigger a
+           card re-render. Ops read the autosaved draft and append. */}}
+      <div class="px-3 pb-2.5 pl-10 flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-edge/40 pt-2">
+        {{range .DBs}}
+        <button type="button"
+                hx-post="/deploy/draft/{{$.DraftID}}/card/{{$card.Index}}" hx-vals='{"op":"usedb","db":"{{.}}"}'
+                hx-target="#cart" hx-swap="outerHTML"
+                class="text-[11px] text-accent/80 hover:text-accent border border-accent/30 hover:border-accent/60 rounded px-2 py-0.5">
+          uses {{.}}? &nbsp;+ DATABASE_URL
+        </button>
         {{end}}
+        <details class="text-[11px]">
+          <summary class="text-fade/50 hover:text-fade cursor-pointer w-max select-none">+ connect a service</summary>
+          <form class="js-picker mt-1.5 flex flex-wrap items-end gap-1.5"
+                hx-post="/deploy/draft/{{$.DraftID}}/card/{{.Index}}" hx-target="#cart" hx-swap="outerHTML">
+            <input type="hidden" name="op" value="addref">
+            <label class="flex flex-col gap-0.5"><span class="text-fade/40">service</span>
+              <select name="service" class="bg-card border border-edge/60 rounded px-1.5 py-1 text-ink outline-none focus:border-accent/50">
+                {{range .Others}}<option value="{{.Name}}" data-db="{{if .IsDB}}1{{end}}">{{.Name}}</option>{{end}}
+              </select></label>
+            <label class="flex flex-col gap-0.5"><span class="text-fade/40">value</span>
+              <select name="field" class="bg-card border border-edge/60 rounded px-1.5 py-1 text-ink outline-none focus:border-accent/50">
+                <option value="url">url</option>
+                <option value="host">host</option>
+                <option value="port">port</option>
+                <option value="addr">addr</option>
+                <option value="password">password</option>
+                <option value="base_url">base_url</option>
+                <option value="name">name</option>
+              </select></label>
+            <label class="flex flex-col gap-0.5"><span class="text-fade/40">as</span>
+              <input name="key" placeholder="DATABASE_URL" spellcheck="false"
+                     class="bg-card border border-edge/60 rounded px-1.5 py-1 text-ink font-mono w-40 outline-none focus:border-accent/50"></label>
+            <button class="text-accent/90 hover:text-accent border border-accent/40 hover:border-accent/70 rounded px-2.5 py-1">insert</button>
+          </form>
+          <div class="text-fade/30 mt-1">writes <code>KEY={service.value}</code> — ply resolves it at deploy (a db's <code>url</code> carries its sealed password)</div>
+        </details>
       </div>
-    </form>
+      {{end}}
+    </div>
   {{end}}
   </div>
   {{end}}

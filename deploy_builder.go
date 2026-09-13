@@ -63,14 +63,82 @@ func hasStr(list []string, s string) bool {
 
 // --- view models -------------------------------------------------------------
 
+// otherRef is one of a card's peers — its name plus whether it's a database
+// (so the picker can emphasize url/password and the DATABASE_URL one-click can
+// appear).
+type otherRef struct {
+	Name string
+	IsDB bool
+}
+
+// afterHint names what ply injects for free when this card starts after a peer:
+// <PREFIX>_HOST / <PREFIX>_PORT / <PREFIX>_ADDR at runtime, no env needed.
+type afterHint struct {
+	Name   string
+	Prefix string
+}
+
 type cardView struct {
 	Index       int
 	C           cart.Card
-	Others      []string // other card names, for the `after` checkboxes
-	EnvText     string   // env as KEY=VALUE lines
-	PublishText string   // publish, one per line
+	Others      []otherRef  // peers — for the `after` checkboxes and the connect picker
+	AfterInject []afterHint // this card's checked afters → the env prefixes ply injects
+	DBs         []string    // peer databases — for the DATABASE_URL one-click
+	EnvText     string      // env as KEY=VALUE lines
+	PublishText string      // publish, one per line
 	DomainText  string
 	VolumeText  string
+}
+
+// isDatabase reports whether a service (by its registry ref or its name) is a
+// database ply can compose a connection URL for — drives the DATABASE_URL
+// one-click and the picker's field emphasis.
+func isDatabase(refOrName string) bool {
+	s := strings.ToLower(refOrName)
+	for _, kw := range []string{"postgresql", "postgres", "mariadb", "mysql", "valkey", "redis", "mongodb", "mongo"} {
+		if strings.Contains(s, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+// injectPrefix is the env prefix `after` injects for a member — its name
+// upper-snaked (qa-server → QA_SERVER, giving QA_SERVER_HOST / QA_SERVER_PORT).
+func injectPrefix(name string) string {
+	var b strings.Builder
+	for _, r := range strings.ToUpper(name) {
+		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('_')
+		}
+	}
+	return b.String()
+}
+
+// addEnvRef appends a `KEY={service.field}` reference to a card's env — the
+// picker's insert. A blank key/service/field is a no-op.
+func addEnvRef(c *cart.Card, service, field, key string) {
+	service, field, key = strings.TrimSpace(service), strings.TrimSpace(field), strings.TrimSpace(key)
+	if service == "" || field == "" || key == "" {
+		return
+	}
+	c.Env = append(c.Env, key+"={"+service+"."+field+"}")
+}
+
+// useDatabase folds the "needs a database?" wizard into a card: inject the
+// standard DATABASE_URL={db.url} and make it start after the db (start order +
+// address injection). Idempotent on `after`.
+func useDatabase(c *cart.Card, db string) {
+	db = strings.TrimSpace(db)
+	if db == "" {
+		return
+	}
+	c.Env = append(c.Env, "DATABASE_URL={"+db+".url}")
+	if !hasStr(c.After, db) {
+		c.After = append(c.After, db)
+	}
 }
 
 type registryMatch struct {
@@ -163,14 +231,24 @@ func splitLines(s string) []string {
 func (s *server) depDir() string { return s.paths.Deployments }
 
 func toCardView(c cart.Card, i int, all []cart.Card) cardView {
-	others := make([]string, 0, len(all))
+	others := make([]otherRef, 0, len(all))
+	var dbs []string
 	for j, o := range all {
-		if j != i && o.Name != "" {
-			others = append(others, o.Name)
+		if j == i || o.Name == "" {
+			continue
+		}
+		db := isDatabase(o.Ref) || isDatabase(o.Name)
+		others = append(others, otherRef{Name: o.Name, IsDB: db})
+		if db {
+			dbs = append(dbs, o.Name)
 		}
 	}
+	hints := make([]afterHint, 0, len(c.After))
+	for _, a := range c.After {
+		hints = append(hints, afterHint{Name: a, Prefix: injectPrefix(a)})
+	}
 	return cardView{
-		Index: i, C: c, Others: others,
+		Index: i, C: c, Others: others, AfterInject: hints, DBs: dbs,
 		EnvText:     strings.Join(c.Env, "\n"),
 		PublishText: strings.Join(c.Publish, "\n"),
 		DomainText:  strings.Join(c.Domain, "\n"),
@@ -320,6 +398,10 @@ func (s *server) deployCardOp(w http.ResponseWriter, r *http.Request) {
 		if i < len(c.Cards)-1 {
 			c.Cards[i+1], c.Cards[i] = c.Cards[i], c.Cards[i+1]
 		}
+	case "addref": // the connect picker: append KEY={service.field}
+		addEnvRef(&c.Cards[i], r.FormValue("service"), r.FormValue("field"), r.FormValue("key"))
+	case "usedb": // the DATABASE_URL one-click
+		useDatabase(&c.Cards[i], r.FormValue("db"))
 	default: // edit
 		edited := parseCardForm(r)
 		edited.Kind, edited.Ref = c.Cards[i].Kind, c.Cards[i].Ref // source is immutable

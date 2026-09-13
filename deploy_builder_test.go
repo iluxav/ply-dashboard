@@ -107,6 +107,83 @@ func TestDeployNewPageRenders(t *testing.T) {
 	}
 }
 
+func TestAddEnvRef(t *testing.T) {
+	c := cart.Card{Name: "server"}
+	addEnvRef(&c, "postgres", "url", "DATABASE_URL")
+	if len(c.Env) != 1 || c.Env[0] != "DATABASE_URL={postgres.url}" {
+		t.Fatalf("addEnvRef env = %v", c.Env)
+	}
+	addEnvRef(&c, "postgres", "host", "  ") // blank key → no-op
+	addEnvRef(&c, "", "url", "X")           // blank service → no-op
+	if len(c.Env) != 1 {
+		t.Fatalf("blank inputs should be skipped: %v", c.Env)
+	}
+}
+
+func TestUseDatabase(t *testing.T) {
+	c := cart.Card{Name: "server"}
+	useDatabase(&c, "db")
+	if len(c.Env) != 1 || c.Env[0] != "DATABASE_URL={db.url}" {
+		t.Fatalf("useDatabase env = %v", c.Env)
+	}
+	if !hasStr(c.After, "db") {
+		t.Fatalf("useDatabase should set after: %v", c.After)
+	}
+	useDatabase(&c, "db") // after stays unique
+	n := 0
+	for _, a := range c.After {
+		if a == "db" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("db should appear once in after: %v", c.After)
+	}
+}
+
+func TestIsDatabase(t *testing.T) {
+	for _, s := range []string{"postgres@17", "ply/postgres", "mysql", "mariadb@11", "redis:7", "valkey", "mongodb", "mongo@6"} {
+		if !isDatabase(s) {
+			t.Errorf("isDatabase(%q) = false, want true", s)
+		}
+	}
+	for _, s := range []string{"qa-server", "web", "https://github.com/you/api", "nginx"} {
+		if isDatabase(s) {
+			t.Errorf("isDatabase(%q) = true, want false", s)
+		}
+	}
+}
+
+func TestInjectPrefix(t *testing.T) {
+	for in, want := range map[string]string{
+		"qa-server": "QA_SERVER", "db": "DB", "web.api": "WEB_API", "postgres": "POSTGRES",
+	} {
+		if got := injectPrefix(in); got != want {
+			t.Errorf("injectPrefix(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestCartShowsWiringAffordances(t *testing.T) {
+	tmpl := builderTemplate(t, "web/templates/cart.html")
+	data := pageData{DraftID: "d1", Cards: cardViews([]cart.Card{
+		{Name: "postgres", Kind: cart.KindRegistry, Ref: "postgres@17"},
+		{Name: "server", Kind: cart.KindRepo, Ref: "https://github.com/you/server", After: []string{"postgres"}},
+	})}
+	var b strings.Builder
+	if err := tmpl.ExecuteTemplate(&b, "cart", data); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	// the server card offers the db one-click, the connect picker, and the
+	// "injected free" hint naming POSTGRES_HOST/POSTGRES_PORT
+	for _, want := range []string{"+ DATABASE_URL", "+ connect a service", "POSTGRES_HOST", "POSTGRES_PORT", `name="service"`} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("cart wiring missing %q in:\n%s", want, out)
+		}
+	}
+}
+
 func TestClassifySource(t *testing.T) {
 	cases := map[string]string{
 		"":                            "empty",

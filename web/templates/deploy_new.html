@@ -101,6 +101,19 @@
       input.value=''; paint(); input.focus();
     }
   });
+  // connect-picker: suggest the env KEY from the chosen service + field
+  // (db + url → DATABASE_URL; else SERVICE_FIELD) until the user types one.
+  document.body.addEventListener('change', function(e){
+    var f = e.target.closest && e.target.closest('.js-picker'); if(!f) return;
+    var svc=f.querySelector('[name=service]'), fld=f.querySelector('[name=field]'), key=f.querySelector('[name=key]');
+    if(!svc||!fld||!key||key.dataset.touched) return;
+    var opt=svc.selectedOptions[0], isdb=opt&&opt.dataset.db==='1',
+        S=(svc.value||'').toUpperCase().replace(/[^A-Z0-9]+/g,'_');
+    key.value = (isdb && fld.value==='url') ? 'DATABASE_URL' : S+'_'+fld.value.toUpperCase();
+  });
+  document.body.addEventListener('input', function(e){
+    if(e.target.name==='key' && e.target.closest && e.target.closest('.js-picker')) e.target.dataset.touched='1';
+  });
 })();
 </script>
 {{end}}
