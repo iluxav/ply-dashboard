@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/iluxav/ply-dashboard/internal/cart"
+	"github.com/iluxav/ply-dashboard/internal/github"
 )
 
 func builderTemplate(t *testing.T, files ...string) *template.Template {
@@ -259,5 +260,20 @@ func TestEnvRefsAreIdempotent(t *testing.T) {
 	addEnvRef(c, "postgres", "host", "PGHOST")
 	if !hasStr(c.Env, "PGHOST={postgres.host}") {
 		t.Fatalf("PGHOST not added: %v", c.Env)
+	}
+}
+
+func TestPlyRepoWithPackageJSONPrefillsNpmInstall(t *testing.T) {
+	// a ply.toml Node app: build must be prefilled so node_modules exists at pack
+	c := cardFromInspection(github.Inspection{
+		Framework: "ply", CloneURL: "https://github.com/you/api", HasPackageJSON: true, AppPort: "3001",
+	}, "")
+	if c.Build != "npm install" {
+		t.Fatalf("build = %q, want %q", c.Build, "npm install")
+	}
+	// a ply.toml repo with no package.json (e.g. Go/Rust) stays buildless
+	c2 := cardFromInspection(github.Inspection{Framework: "ply", CloneURL: "https://github.com/you/svc"}, "")
+	if c2.Build != "" {
+		t.Fatalf("build = %q, want empty", c2.Build)
 	}
 }

@@ -269,6 +269,14 @@ func cardFromInspection(insp github.Inspection, input string) cart.Card {
 		if insp.AppPort != "" {
 			c.Publish = []string{"internal:" + insp.AppPort}
 		}
+		// A Node app whose ply.toml supplies the entrypoint still needs its
+		// deps installed before the pack (its include usually lists
+		// node_modules/). Prefill npm install so the pack doesn't fail on a
+		// missing node_modules — editable, and blank is fine for a repo that
+		// needs no build.
+		if c.Build == "" && insp.HasPackageJSON {
+			c.Build = "npm install"
+		}
 	default:
 		if preset.Port != "" {
 			c.Publish = []string{"internal:" + preset.Port}

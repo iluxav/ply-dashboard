@@ -48,6 +48,11 @@ type Inspection struct {
 	// intent, not a guess — the wizard shows "reads: …" and offers these as
 	// pick-or-type targets when mapping a peer's exposed field to an env var.
 	EnvExample []string
+	// HasPackageJSON: the repo ships a package.json — a Node app that needs
+	// `npm install` before packing, even when its ply.toml supplies the
+	// entrypoint (its include usually lists node_modules/). The wizard
+	// prefills that build so the pack doesn't fail on a missing node_modules.
+	HasPackageJSON bool
 }
 
 // Release: the CI-image lane's offer — the latest release ships a ply
@@ -234,6 +239,7 @@ func (i *Inspection) probe(token string) {
 	hasPkg, hasNext := false, false
 	if status, body := raw("package.json"); status == http.StatusOK {
 		hasPkg = true
+		i.HasPackageJSON = true
 		i.Markers = append(i.Markers, "package.json")
 		if json.Unmarshal(body, &pkg) == nil {
 			_, dep := pkg.Dependencies["next"]
