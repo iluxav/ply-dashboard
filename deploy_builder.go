@@ -119,12 +119,26 @@ func injectPrefix(name string) string {
 
 // addEnvRef appends a `KEY={service.field}` reference to a card's env — the
 // picker's insert. A blank key/service/field is a no-op.
+// setEnvKey sets KEY=val, replacing an existing KEY= line rather than
+// appending a duplicate — so re-inserting (or clicking a one-click twice) is
+// idempotent and updates in place instead of piling up.
+func setEnvKey(env []string, key, val string) []string {
+	line := key + "=" + val
+	for i, e := range env {
+		if k, _, ok := strings.Cut(e, "="); ok && strings.TrimSpace(k) == key {
+			env[i] = line
+			return env
+		}
+	}
+	return append(env, line)
+}
+
 func addEnvRef(c *cart.Card, service, field, key string) {
 	service, field, key = strings.TrimSpace(service), strings.TrimSpace(field), strings.TrimSpace(key)
 	if service == "" || field == "" || key == "" {
 		return
 	}
-	c.Env = append(c.Env, key+"={"+service+"."+field+"}")
+	c.Env = setEnvKey(c.Env, key, "{"+service+"."+field+"}")
 }
 
 // useDatabase folds the "needs a database?" wizard into a card: inject the
@@ -135,7 +149,7 @@ func useDatabase(c *cart.Card, db string) {
 	if db == "" {
 		return
 	}
-	c.Env = append(c.Env, "DATABASE_URL={"+db+".url}")
+	c.Env = setEnvKey(c.Env, "DATABASE_URL", "{"+db+".url}")
 	if !hasStr(c.After, db) {
 		c.After = append(c.After, db)
 	}

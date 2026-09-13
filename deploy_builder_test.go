@@ -203,3 +203,25 @@ func TestClassifySource(t *testing.T) {
 		}
 	}
 }
+
+func TestEnvRefsAreIdempotent(t *testing.T) {
+	c := &cart.Card{Name: "web"}
+	// same KEY twice → one line, updated in place, never duplicated
+	useDatabase(c, "postgres")
+	useDatabase(c, "postgres")
+	addEnvRef(c, "postgres", "url", "DATABASE_URL")
+	n := 0
+	for _, e := range c.Env {
+		if strings.HasPrefix(e, "DATABASE_URL=") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("DATABASE_URL appears %d times, want 1: %v", n, c.Env)
+	}
+	// a different KEY for the same ref still adds its own line
+	addEnvRef(c, "postgres", "host", "PGHOST")
+	if !hasStr(c.Env, "PGHOST={postgres.host}") {
+		t.Fatalf("PGHOST not added: %v", c.Env)
+	}
+}
