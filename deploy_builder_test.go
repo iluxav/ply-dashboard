@@ -175,12 +175,16 @@ func TestCartShowsWiringAffordances(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := b.String()
-	// the server card offers the db one-click, the connect picker, and the
-	// "injected free" hint naming POSTGRES_HOST/POSTGRES_PORT
-	for _, want := range []string{"+ DATABASE_URL", "+ connect a service", "POSTGRES_HOST", "POSTGRES_PORT", `name="service"`} {
+	// the server card offers the connect picker (service → exposed field →
+	// your env var) and the "injected free" hint naming POSTGRES_HOST/PORT.
+	// No auto-wiring button: the user maps what a service exposes themselves.
+	for _, want := range []string{"+ connect a service", "it exposes", "the name your app reads", "POSTGRES_HOST", "POSTGRES_PORT", `name="service"`} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("cart wiring missing %q in:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "+ DATABASE_URL") {
+		t.Fatalf("the auto DATABASE_URL button should be gone (no-auto-wiring)")
 	}
 }
 

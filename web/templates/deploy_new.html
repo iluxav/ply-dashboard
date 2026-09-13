@@ -101,19 +101,28 @@
       input.value=''; paint(); input.focus();
     }
   });
-  // connect-picker: suggest the env KEY from the chosen service + field
-  // (db + url → DATABASE_URL; else SERVICE_FIELD) until the user types one.
-  document.body.addEventListener('change', function(e){
-    var f = e.target.closest && e.target.closest('.js-picker'); if(!f) return;
-    var svc=f.querySelector('[name=service]'), fld=f.querySelector('[name=field]'), key=f.querySelector('[name=key]');
-    if(!svc||!fld||!key||key.dataset.touched) return;
+  // connect-picker: the "exposes" dropdown shows what the SELECTED service
+  // actually exposes — built-in facts for any service, plus a database's
+  // connection params. No key magic: you name the env var your app reads.
+  var FACTS=['host','port','addr','base_url','name','version'],
+      DBP=['url','password','database','user'];
+  function fillFields(svc){
+    var f=svc.closest('.js-picker'); if(!f) return;
+    var fld=f.querySelector('[name=field]'); if(!fld) return;
     var opt=svc.selectedOptions[0], isdb=opt&&opt.dataset.db==='1',
-        S=(svc.value||'').toUpperCase().replace(/[^A-Z0-9]+/g,'_');
-    key.value = (isdb && fld.value==='url') ? 'DATABASE_URL' : S+'_'+fld.value.toUpperCase();
-  });
-  document.body.addEventListener('input', function(e){
-    if(e.target.name==='key' && e.target.closest && e.target.closest('.js-picker')) e.target.dataset.touched='1';
-  });
+        list=isdb?DBP.concat(FACTS):FACTS, cur=fld.value;
+    fld.innerHTML=list.map(function(x){return '<option value="'+x+'">'+x+'</option>';}).join('');
+    if(list.indexOf(cur)>=0) fld.value=cur;
+  }
+  function initPickers(root){
+    (root||document).querySelectorAll('.js-picker [name=service]').forEach(function(s){
+      if(s.dataset.wired) return; s.dataset.wired='1';
+      s.addEventListener('change', function(){ fillFields(s); });
+      fillFields(s);
+    });
+  }
+  initPickers();
+  document.body.addEventListener('htmx:afterSwap', function(e){ initPickers(e.target); });
 })();
 </script>
 {{end}}
