@@ -219,6 +219,9 @@
     <input type="hidden" name="repo" value="{{.Spec.Repo}}">
     <input type="hidden" name="gh_repo" value="{{.Gh.Repo}}">
     <input type="hidden" name="token" value="{{.Token}}">
+    {{/* detected = the host owns the recipe (Next.js auto-detect, or the
+         repo's own ply.toml), so an empty build+entrypoint is legal here. */}}
+    <input type="hidden" name="detected" value="{{if or (eq .Framework "nextjs") (eq .Framework "ply")}}1{{end}}">
 
     <fieldset class="md:col-span-2 flex gap-4 items-baseline">
       <span class="text-fade/50">how to deploy:</span>
@@ -289,7 +292,7 @@
       <textarea name="build" rows="2" class="bg-card border border-edge rounded px-2 py-1.5 text-ink font-mono">{{.Spec.Build}}</textarea>
     </label>
     <label class="grid gap-1">
-      <span class="text-fade/50">entrypoint <span class="text-fade/35">(needed unless the repo has a ply.toml)</span></span>
+      <span class="text-fade/50">entrypoint <span class="text-fade/35">(auto-detected for Next.js &amp; repos with a ply.toml — set it for other stacks)</span></span>
       <input name="entrypoint" value="{{.Spec.Entrypoint}}" class="bg-card border border-edge rounded px-2 py-1.5 text-ink font-mono">
     </label>
     <label class="grid gap-1">

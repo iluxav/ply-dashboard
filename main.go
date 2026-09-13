@@ -1236,8 +1236,26 @@ func (s *server) sourceInspect(w http.ResponseWriter, r *http.Request) {
 		preset := github.PresetFor(form.Framework)
 		spec.Build, spec.Runtime = preset.Build, preset.Runtime
 		spec.Entrypoint, spec.Include, spec.Port = preset.Entrypoint, preset.Include, preset.Port
-		if spec.Publish == "" && preset.Port != "" {
-			spec.Publish = "internal:" + preset.Port
+		// Detected = the host produces a runnable manifest without the order
+		// spelling out build+entrypoint: a repo with its own single-app
+		// ply.toml (the host reads it), or Next.js (the host auto-detects it).
+		// For those the order is lean — build/entrypoint are optional overrides
+		// — and publish is prefilled from the port ply ui would use.
+		switch form.Framework {
+		case "nextjs":
+			spec.Detected = true
+			if spec.Publish == "" {
+				spec.Publish = "internal:3000"
+			}
+		case "ply":
+			spec.Detected = true
+			if spec.Publish == "" && insp.AppPort != "" {
+				spec.Publish = "internal:" + insp.AppPort
+			}
+		default:
+			if spec.Publish == "" && preset.Port != "" {
+				spec.Publish = "internal:" + preset.Port
+			}
 		}
 	}
 	spec.Repo = insp.CloneURL
@@ -1406,6 +1424,7 @@ func specFromForm(r *http.Request) plystate.SourceSpec {
 		Env:         r.FormValue("env"),
 		Manual:      r.FormValue("manual") == "1",
 		Composition: r.FormValue("composition") == "1",
+		Detected:    r.FormValue("detected") == "1",
 	}
 }
 

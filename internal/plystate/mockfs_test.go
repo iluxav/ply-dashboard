@@ -147,6 +147,48 @@ func TestSourceSpecRender(t *testing.T) {
 	}
 }
 
+// A detected spec (host owns the recipe: Next.js auto-detect, or the repo's
+// own single-app ply.toml) is legal with an empty build AND entrypoint — the
+// host fills the recipe. The order is then just repo= plus overrides.
+func TestSourceSpecRenderDetected(t *testing.T) {
+	spec := SourceSpec{
+		Name:     "site",
+		Repo:     "https://github.com/acme/site",
+		Ref:      "main",
+		Publish:  "internal:3000",
+		Detected: true,
+	}
+	text, err := spec.Render()
+	if err != nil {
+		t.Fatalf("detected spec should render with no build/entrypoint: %v", err)
+	}
+	if !strings.Contains(text, `repo = "https://github.com/acme/site"`) {
+		t.Errorf("missing repo line:\n%s", text)
+	}
+	if !strings.Contains(text, `publish = ["internal:3000"]`) {
+		t.Errorf("missing publish override:\n%s", text)
+	}
+	for _, bad := range []string{"build =", "entrypoint =", "include =", "port ="} {
+		if strings.Contains(text, bad) {
+			t.Errorf("detected order should stay lean, found %q:\n%s", bad, text)
+		}
+	}
+
+	// A detected spec still honors a build override when the user sets one.
+	withBuild := SourceSpec{Name: "site", Repo: "x", Build: NextjsBuildFixture, Detected: true}
+	text, err = withBuild.Render()
+	if err != nil {
+		t.Fatalf("render with build: %v", err)
+	}
+	if !strings.Contains(text, "npm install") {
+		t.Errorf("build override dropped:\n%s", text)
+	}
+}
+
+// NextjsBuildFixture mirrors the host's shared const for the test above
+// without importing the github package (avoids a plystate→github edge).
+const NextjsBuildFixture = `npm install && npm run build`
+
 func TestWriteDeployKey(t *testing.T) {
 	w := newMockWorld(t.TempDir())
 	if _, err := WriteDeployKey(w.p, "shop", "not a key"); err == nil {

@@ -38,6 +38,11 @@ type Inspection struct {
 	// one line deploys the whole set, the host builds each service. When set,
 	// the wizard offers a one-line repo= order, not the single-app form.
 	PlyComposition bool
+	// AppPort: a single-app ply.toml's declared port (from `ports = { … }`
+	// or a `[ports]` table), so the form can prefill publish `internal:<port>`
+	// the way `ply ui` does — the host reads the recipe from the ply.toml, so
+	// the order needs no build/entrypoint, just the publish override.
+	AppPort string
 }
 
 // Release: the CI-image lane's offer — the latest release ships a ply
@@ -55,6 +60,24 @@ var stackName = regexp.MustCompile(`(?m)^\s*name\s*=\s*"([^"]+)"`)
 // the spelling; `[[app]]` is the legacy alias, still recognized.
 func isComposition(body string) bool {
 	return strings.Contains(body, "[[service]]") || strings.Contains(body, "[[app]]")
+}
+
+// A ply.toml declares its port either inline (`ports = { web = 3000 }`, the
+// grouped/flat authoring form) or as a `[ports]` table. firstPort returns
+// the first port it finds — best-effort, for the publish prefill only.
+var (
+	portInline  = regexp.MustCompile(`(?m)^[ \t]*ports[ \t]*=[ \t]*\{[^}]*?=[ \t]*(\d+)`)
+	portSection = regexp.MustCompile(`(?s)\[ports\][^\[]*?[A-Za-z0-9_-]+[ \t]*=[ \t]*(\d+)`)
+)
+
+func firstPort(body string) string {
+	if m := portInline.FindStringSubmatch(body); m != nil {
+		return m[1]
+	}
+	if m := portSection.FindStringSubmatch(body); m != nil {
+		return m[1]
+	}
+	return ""
 }
 
 var repoPattern = regexp.MustCompile(
@@ -182,6 +205,10 @@ func (i *Inspection) probe(token string) {
 		// service on the box.
 		if isComposition(string(body)) {
 			i.PlyComposition = true
+		} else {
+			// A single-app ply.toml: the host reads its recipe, so the order
+			// is bare repo= — carry the declared port to prefill publish.
+			i.AppPort = firstPort(string(body))
 		}
 	}
 	// A repo shipping a stack.toml describes its whole deployment — the app
@@ -230,7 +257,7 @@ func (i *Inspection) probe(token string) {
 		i.Note = "the repo carries its own ply.toml — entrypoint/include come from it; add a build command only if artifacts must be compiled first"
 	case hasNext:
 		i.Framework = "nextjs"
-		i.Note = `Next.js — the preset needs output: "standalone" in next.config, and keeps the static-assets copy step (without it /_next/static 404s)`
+		i.Note = "Next.js detected — deploys as-is (the host builds it: npm install, next build, then runs the standalone server). Needs output: \"standalone\" in next.config; the build/publish below are prefilled and editable, entrypoint is auto-detected."
 	case hasPkg:
 		i.Framework = "node"
 		i.Note = "Node — the preset assumes `npm run build` emits dist/; adjust entrypoint/include to the repo's layout"
@@ -246,6 +273,15 @@ func (i *Inspection) probe(token string) {
 	}
 }
 
+// NextjsBuild is the exact build command the ply host (v0.1.99+) synthesizes
+// when it auto-detects a Next.js standalone repo — shared verbatim with the
+// `ply ui` form so the dashboard PREFILLS the same command (visible +
+// editable) rather than nudging the user toward a divergent recipe. Always
+// `npm install`, never `npm ci`: ci needs a committed lockfile and an install
+// *creates* one, so a lockfile-based choice flips and fails; install works
+// either way. Then build, and fold static/public into the standalone tree.
+const NextjsBuild = `npm install && npm run build && cp -r .next/static .next/standalone/.next/ && { [ -d public ] && cp -r public .next/standalone/ || true; }`
+
 // Preset is the known-good prefill per framework — validated commands from
 // live droplet runs, not guesses.
 type Preset struct {
@@ -255,16 +291,20 @@ type Preset struct {
 func PresetFor(framework string) Preset {
 	switch framework {
 	case "nextjs":
+		// The host auto-detects a no-ply.toml Next.js repo: it fills the
+		// entrypoint (node .next/standalone/server.js), include and port on
+		// its own. So the order is lean — only the Build command is prefilled
+		// (editable, or blank to let the host decide), and publish defaults to
+		// internal:3000 in the handler. Leaving entrypoint/include/port empty
+		// keeps the host's auto-detect in charge — "deploys as-is".
 		return Preset{
-			Build:      `npm ci && npm run build && rm -rf .next/standalone/.next/static .next/standalone/public && cp -r .next/static .next/standalone/.next/static && cp -r public .next/standalone/public`,
-			Runtime:    "node@24",
-			Entrypoint: "node .next/standalone/server.js",
-			Include:    ".next/standalone/",
-			Port:       "3000",
+			Build: NextjsBuild,
 		}
 	case "node":
 		return Preset{
-			Build:      "npm ci && npm run build",
+			// `npm install`, not `npm ci`: a repo without a committed
+			// package-lock.json (a common case) has no lockfile for ci to read.
+			Build:      "npm install && npm run build",
 			Runtime:    "node@24",
 			Entrypoint: "node dist/index.js",
 			Include:    "dist/, node_modules/, package.json",

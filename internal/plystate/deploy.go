@@ -425,6 +425,13 @@ type SourceSpec struct {
 	// ply.toml. No build/entrypoint/runtime/port: those are single-app fields
 	// reconcile would ignore.
 	Composition bool
+	// Detected: the host produces a runnable manifest without the order
+	// spelling out build+entrypoint — a repo that carries its own single-app
+	// ply.toml (the host reads it), or a framework the host auto-detects
+	// (Next.js on v0.1.99+). For those the order is lean and an empty build
+	// AND entrypoint is legal: the host fills the recipe. Build/entrypoint,
+	// when set, are still honored as overrides.
+	Detected bool
 }
 
 // Render validates and returns the exact TOML the deployment file will
@@ -448,7 +455,7 @@ func (s SourceSpec) Render() (string, error) {
 		}
 		port = n
 	}
-	if !s.Composition && strings.TrimSpace(s.Build) == "" && strings.TrimSpace(s.Entrypoint) == "" {
+	if !s.Composition && !s.Detected && strings.TrimSpace(s.Build) == "" && strings.TrimSpace(s.Entrypoint) == "" {
 		return "", fmt.Errorf("need a build command, an entrypoint, or both — an empty spec builds nothing")
 	}
 
