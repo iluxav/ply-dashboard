@@ -247,6 +247,7 @@ func main() {
 	mux.HandleFunc("POST /notify/test", s.guard(s.notifyTest))
 	mux.HandleFunc("POST /secret/seal", s.guard(s.sealAction))
 	mux.HandleFunc("POST /deploy/{name}/delete", s.guard(s.deployDelete))
+	mux.HandleFunc("POST /deploy/volume/reclaim", s.guard(s.volumeReclaim))
 	mux.HandleFunc("GET /partials/deployments", s.guard(s.deploymentsPartial))
 	mux.HandleFunc("GET /partials/events", s.guard(s.eventsPartial))
 	mux.HandleFunc("GET /partials/logpane/{name}", s.guard(s.logPane))
@@ -362,6 +363,7 @@ type pageData struct {
 	Events         []plystate.Event
 
 	DeployCount int
+	Orphans     []plystate.Volume // orphaned volumes — reclaimable data
 	FleetRepo   string
 	HelpTopic   string
 	EnvFiles    []plystate.EnvFile
@@ -666,6 +668,7 @@ func (s *server) deployPage(w http.ResponseWriter, r *http.Request) {
 	}
 	if data.DeployAvailable {
 		data.EnvFiles, data.EnvExternal = plystate.EnvFiles(s.paths)
+		data.Orphans = plystate.OrphanVolumes(s.paths)
 	}
 	s.render(w, "deploy", "base.html", data)
 }
@@ -910,10 +913,52 @@ func (s *server) deployEdit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) deployDelete(w http.ResponseWriter, r *http.Request) {
-	if err := plystate.DeleteDeployment(s.paths, r.PathValue("name")); err != nil {
+	name := r.PathValue("name")
+	// "delete + data": queue the deployment's volumes for reap BEFORE removing
+	// the file. The plain delete keeps data (config is not data); this path is
+	// the explicit, hard-confirmed opt-in. reconcile stops the members first,
+	// then reaps on a later beat (the reap file retries a still-live app).
+	if r.FormValue("with_data") == "1" {
+		if err := plystate.RequestReap(s.paths, s.deploymentApps(name)...); err != nil {
+			log.Printf("reap request for %s: %v", name, err)
+		}
+	}
+	if err := plystate.DeleteDeployment(s.paths, name); err != nil {
 		log.Printf("delete deployment: %v", err)
 	}
 	s.fresh.Kick()
+	http.Redirect(w, r, "/deploy", http.StatusSeeOther)
+}
+
+// deploymentApps returns the app names whose volumes belong to a deployment:
+// a stack's member apps (from `.status/<name>.members`), or a single-app
+// deployment's inner app (its `app =` value, else the deployment name).
+func (s *server) deploymentApps(name string) []string {
+	var apps []string
+	for app, stack := range plystate.StackMembers(s.paths) {
+		if stack == name {
+			apps = append(apps, app)
+		}
+	}
+	if len(apps) > 0 {
+		return apps
+	}
+	if d, ok := plystate.OneDeployment(s.paths, name); ok {
+		if a := d.Field("app"); a != "" {
+			return []string{a}
+		}
+	}
+	return []string{name}
+}
+
+// volumeReclaim queues one orphaned app's volumes for reap (the "reclaim"
+// button). reconcile removes them next beat and emits a volume-reaped event.
+func (s *server) volumeReclaim(w http.ResponseWriter, r *http.Request) {
+	if app := strings.TrimSpace(r.FormValue("app")); app != "" {
+		if err := plystate.RequestReap(s.paths, app); err != nil {
+			log.Printf("reclaim %s: %v", app, err)
+		}
+	}
 	http.Redirect(w, r, "/deploy", http.StatusSeeOther)
 }
 

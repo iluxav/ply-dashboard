@@ -51,6 +51,29 @@
   {{template "deployments" .}}
 </div>
 
+{{if .Orphans}}
+<div class="flex items-center gap-2 mt-10 mb-3">
+  <h2 class="text-accent/80 text-[10px] uppercase tracking-wider">reclaimable data</h2>
+  <span class="text-fade/40 text-[10px]">({{len .Orphans}})</span>
+</div>
+<div class="text-fade/50 text-xs mb-3">volumes left by deleted deployments — ply keeps data by default; reclaim what you don't need</div>
+<div class="space-y-2">
+{{range .Orphans}}
+  <div class="border border-edge rounded px-3 py-2 flex items-center gap-3 text-xs">
+    <span class="text-ink">{{.App}}</span>
+    {{if .ShowName}}<span class="text-fade/50">{{.Name}}</span>{{end}}
+    <span class="text-fade/50">{{.Size}}</span>
+    <span class="text-fade/35">orphaned — no deployment claims it</span>
+    <form method="post" action="/deploy/volume/reclaim" class="ml-auto"
+          onsubmit="return confirm('Reclaim {{.App}}\'s data? It is deleted for good on the next reconcile beat.')">
+      <input type="hidden" name="app" value="{{.App}}">
+      <button class="text-fade/50 hover:text-red-400 border border-deep rounded px-2 py-0.5">reclaim</button>
+    </form>
+  </div>
+{{end}}
+</div>
+{{end}}
+
 <div class="flex items-center gap-2 mt-10 mb-3">
   <h2 class="text-accent/80 text-[10px] uppercase tracking-wider">shared env files</h2>
   {{template "helplink" "env"}}

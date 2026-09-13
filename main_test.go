@@ -94,3 +94,52 @@ func TestDeploymentsShowReadOnlyRecipe(t *testing.T) {
 		t.Fatal("expected the recipe TOML to be rendered")
 	}
 }
+
+// The reclaimable-data section shows an orphan row with its size and a reclaim
+// button posting the app name; with no orphans the section is absent.
+func TestDeployPageShowsReclaimableOrphans(t *testing.T) {
+	tmpl := testTemplate(t, "web/templates/deploy.html", "web/templates/deployments.html")
+	data := pageData{
+		DeployAvailable: true,
+		Orphans:         []plystate.Volume{{App: "db", Name: "data.1", Status: "orphaned", Bytes: 40632320, HasBytes: true}},
+	}
+	var b strings.Builder
+	if err := tmpl.ExecuteTemplate(&b, "content", data); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	for _, want := range []string{"reclaimable data", "/deploy/volume/reclaim", `name="app" value="db"`, "reclaim", "38.8 MiB"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("orphan section missing %q in:\n%s", want, out)
+		}
+	}
+}
+
+func TestDeployPageNoOrphansNoSection(t *testing.T) {
+	tmpl := testTemplate(t, "web/templates/deploy.html", "web/templates/deployments.html")
+	var b strings.Builder
+	if err := tmpl.ExecuteTemplate(&b, "content", pageData{DeployAvailable: true}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(b.String(), "reclaimable data") {
+		t.Fatal("no orphans → no reclaimable-data section")
+	}
+}
+
+// The safe "delete" stays, and a secondary "delete + data" (with_data=1) is
+// added — both to the same delete route.
+func TestDeploymentsDeleteWithData(t *testing.T) {
+	tmpl := testTemplate(t, "web/templates/deployments.html")
+	groups := plystate.GroupDeployments([]plystate.Deployment{{Name: "xcf", Spec: `repo = "x"`}})
+	var b strings.Builder
+	if err := tmpl.ExecuteTemplate(&b, "deployments", pageData{Groups: groups}); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	if !strings.Contains(out, "delete + data") || !strings.Contains(out, `name="with_data" value="1"`) {
+		t.Fatalf("expected a delete + data action:\n%s", out)
+	}
+	if strings.Count(out, `action="/deploy/xcf/delete"`) != 2 {
+		t.Fatal("expected both delete and delete+data to post the same route")
+	}
+}

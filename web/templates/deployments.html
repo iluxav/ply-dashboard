@@ -40,6 +40,11 @@
             onsubmit="return confirm('Delete deployment {{.Name}}? The app stops and its unit is removed (volumes kept).')">
         <button class="text-fade/50 hover:text-red-400 text-xs">delete</button>
       </form>
+      <form method="post" action="/deploy/{{.Name}}/delete"
+            onsubmit="return confirm('Delete {{.Name}} AND its data? The volumes are reclaimed on the next reconcile beat — gone for good.')">
+        <input type="hidden" name="with_data" value="1">
+        <button class="text-fade/35 hover:text-red-400 text-xs" title="also reclaim this deployment's volumes">delete + data</button>
+      </form>
     </div>
     {{$name := .Name}}{{$hist := historyOf .Name}}
     {{if gt (len $hist) 1}}
