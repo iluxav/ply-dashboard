@@ -16,13 +16,6 @@
 
 {{with .DeployErr}}<div class="text-red-400 text-xs mb-4 border border-red-900/60 rounded px-3 py-2">{{.}}</div>{{end}}
 
-<nav class="flex items-center gap-1 text-xs border-b border-edge mb-6">
-  <a href="/deploy" class="px-3 py-2 -mb-px border-b-2 {{if eq .Tab "host"}}border-accent text-ink{{else}}border-transparent text-fade/70 hover:text-ink{{end}}">on this host <span class="text-fade/40">({{.DeployCount}})</span></a>
-  <a href="/deploy?tab=new" class="px-3 py-2 -mb-px border-b-2 {{if eq .Tab "new"}}border-accent text-ink{{else}}border-transparent text-fade/70 hover:text-ink{{end}}">new deployment</a>
-  <a href="/deploy?tab=env" class="px-3 py-2 -mb-px border-b-2 {{if eq .Tab "env"}}border-accent text-ink{{else}}border-transparent text-fade/70 hover:text-ink{{end}}">env files <span class="text-fade/40">({{len .EnvFiles}})</span></a>
-</nav>
-
-{{if eq .Tab "host"}}
 {{with .Fleet}}
 <div class="flex items-center gap-2 mb-4 text-xs">
   {{if .OK}}
@@ -32,132 +25,36 @@
   {{end}}
   {{template "helplink" "fleet"}}
 </div>
+{{else}}
+<details class="mb-4 text-xs">
+  <summary class="text-fade/35 hover:text-fade/60 cursor-pointer w-max">enroll this host in a fleet (GitOps)</summary>
+  <div class="text-fade/50 mt-1 mb-2">point at an infra repo — its <span class="text-fade">hosts/&lt;name&gt;/</span> dir syncs to this box every reconcile beat; locally-created deployments coexist.</div>
+  <form method="post" action="/deploy/enroll" class="flex flex-wrap gap-2 items-end">
+    <label class="grid gap-1"><span class="text-fade/50">infra repo</span>
+      <input name="repo" placeholder="git@github.com:you/infra.git" class="bg-card border border-edge rounded px-2 py-1.5 text-ink w-72"></label>
+    <label class="grid gap-1"><span class="text-fade/50">this host's name</span>
+      <input name="host" placeholder="web-1" class="bg-card border border-edge rounded px-2 py-1.5 text-ink w-40"></label>
+    <label class="grid gap-1"><span class="text-fade/50">token (private repos)</span>
+      <input name="token" type="password" placeholder="optional" class="bg-card border border-edge rounded px-2 py-1.5 text-ink w-40"></label>
+    <button class="bg-accent text-ground rounded px-4 py-1.5 font-bold hover:bg-accent-bright">enroll</button>
+  </form>
+</details>
 {{end}}
+
 <div class="flex items-center gap-2 mb-3">
   <h2 class="text-accent/80 text-[10px] uppercase tracking-wider">deployments on this host</h2>
   {{template "helplink" "host"}}
+  <span class="text-fade/40 text-[10px]">({{.DeployCount}})</span>
   <a href="/deploy/new" class="ml-auto text-xs text-accent hover:text-ink border border-edge rounded px-2.5 py-1">+ new deployment</a>
 </div>
 <div hx-get="/partials/deployments" hx-trigger="every 3s" hx-swap="innerHTML">
   {{template "deployments" .}}
 </div>
-{{end}}
-
-{{if eq .Tab "new"}}
-<div class="flex items-center gap-2 mb-3">
-  <h2 class="text-accent/80 text-[10px] uppercase tracking-wider">from source</h2>
-  {{template "helplink" "source"}}
-</div>
-<div class="text-fade/50 text-xs mb-3">paste a repo — the droplet clones and builds it, no CI needed; public repos are inspected for a preset</div>
-{{template "deploy_source" .}}
 
 <div class="flex items-center gap-2 mt-10 mb-3">
-  <h2 class="text-accent/80 text-[10px] uppercase tracking-wider">from registry</h2>
-  {{template "helplink" "registry"}}
-  <input id="registry-filter" type="search" placeholder="filter…" autocomplete="off"
-         oninput="const q=this.value.toLowerCase();document.querySelectorAll('[data-app-card]').forEach(c=>c.style.display=c.textContent.toLowerCase().includes(q)?'':'none')"
-         class="bg-card border border-edge rounded px-2 py-1 text-ink text-xs ml-auto w-56">
-</div>
-{{with .RegistryErr}}<div class="text-accent text-xs mb-3">registry unreachable: {{.}}</div>{{end}}
-
-<div class="space-y-2">
-{{range .RegistryApps}}
-  <details data-app-card class="border border-edge rounded">
-    <summary class="px-3 py-2 cursor-pointer hover:bg-card/70 flex items-baseline gap-3">
-      <span class="text-ink">{{.Name}}</span>
-      {{if ne .Namespace "apps"}}<span class="text-fade/50 text-[10px] border border-edge rounded px-1 py-0.5">{{.Namespace}}</span>{{end}}
-      {{if eq .Type "stack"}}<span class="text-accent/80 text-[10px] border border-accent/40 rounded px-1 py-0.5">stack</span>{{end}}
-      <span class="text-fade/50 text-xs">{{index .Versions 0}}</span>
-      <span class="text-fade/50 text-xs">{{.Description}}</span>
-    </summary>
-    <form method="post" action="/deploy" class="px-3 py-3 border-t border-edge/60 grid gap-2 text-xs md:grid-cols-2">
-      <input type="hidden" name="app" value="{{.Ref}}">
-      <input type="hidden" name="kind" value="{{.Type}}">
-      <label class="grid gap-1">
-        <span class="text-fade/50">deployment name</span>
-        <input name="name" value="{{.Name}}" class="bg-card border border-edge rounded px-2 py-1.5 text-ink">
-      </label>
-      {{if eq .Type "stack"}}
-      <div class="md:col-span-2 text-fade/50">
-        a stack runs one app per member. The next step shows them, and asks for the
-        <span class="text-fade">$VAR</span> values it needs — nothing is deployed until then.
-      </div>
-      <div class="md:col-span-2">
-        <button formaction="/deploy/registry-stack" name="src" value="{{.Src}}"
-                class="bg-accent text-ground rounded px-4 py-1.5 font-bold hover:bg-accent-bright">configure…</button>
-      </div>
-      {{else}}
-      <label class="grid gap-1">
-        <span class="text-fade/50">version</span>
-        <select name="version" class="bg-card border border-edge rounded px-2 py-1.5 text-ink">
-          {{range .Versions}}<option>{{.}}</option>{{end}}
-        </select>
-      </label>
-      <label class="grid gap-1">
-        <span class="text-fade/50">publish (ADDR:PORT)</span>
-        <input name="publish" value="{{.Publish}}" class="bg-card border border-edge rounded px-2 py-1.5 text-ink">
-      </label>
-      <label class="grid gap-1">
-        <span class="text-fade/50">domain (optional, via the edge)</span>
-        <input name="domain" placeholder="db.example.com" class="bg-card border border-edge rounded px-2 py-1.5 text-ink">
-      </label>
-      <label class="grid gap-1 md:col-span-2">
-        <span class="text-fade/50">env (KEY=VALUE per line; blank values are dropped)</span>
-        <textarea name="env" rows="3" class="bg-card border border-edge rounded px-2 py-1.5 text-ink font-mono">{{.Contract}}</textarea>
-      </label>
-      {{if $.EnvFiles}}
-      <label class="grid gap-1 md:col-span-2">
-        <span class="text-fade/50">shared env file (optional — managed on the env files tab, values never enter the spec)</span>
-        <select name="env_file" class="bg-card border border-edge rounded px-2 py-1.5 text-ink">
-          <option value="">none</option>
-          {{range $.EnvFiles}}{{if not .Missing}}<option>{{.Ref}}</option>{{end}}{{end}}
-        </select>
-      </label>
-      {{end}}
-      <label class="flex items-center gap-1.5 text-fade/50 md:col-span-2">
-        <input type="checkbox" name="grant_links" value="1" {{if .GrantLinks}}checked{{end}}>
-        grant the links the image requests (dashboard-style apps: notify needs it to read the events journal)
-      </label>
-      <div class="md:col-span-2">
-        <button class="bg-accent text-ground rounded px-4 py-1.5 font-bold hover:bg-accent-bright">deploy</button>
-        <span class="text-fade/35 ml-3">writes /var/lib/ply/deployments/&lt;name&gt;.toml — systemd notices, `ply reconcile` runs it</span>
-      </div>
-      {{end}}
-    </form>
-  </details>
-{{else}}
-  <div class="text-fade/50 text-xs">no runnable apps in the registry catalog</div>
-{{end}}
-</div>
-
-<div class="flex items-center gap-2 mt-10 mb-3">
-  <h2 class="text-accent/80 text-[10px] uppercase tracking-wider">from a spec</h2>
-</div>
-<div class="text-fade/50 text-xs mb-3">already have a deployment toml? paste it — a single app, or a whole <span class="text-fade">[[service]]</span> composition (reconcile expands one app per member; secrets stay in the env file the spec references)</div>
-
-<details class="border border-edge rounded">
-  <summary class="px-3 py-2 cursor-pointer hover:bg-card/70 text-xs text-ink">paste a spec…</summary>
-  <form method="post" action="/deploy/raw" class="px-3 py-3 border-t border-edge/60 grid gap-2 text-xs">
-    <label class="grid gap-1 md:w-64">
-      <span class="text-fade/50">deployment name</span>
-      <input name="name" placeholder="mystack" class="bg-card border border-edge rounded px-2 py-1.5 text-ink placeholder:text-fade/30">
-    </label>
-    <label class="grid gap-1">
-      <span class="text-fade/50">spec (toml — `app = …` lanes, or [[service]] composition blocks)</span>
-      <textarea name="spec" rows="10" placeholder='[[service]]&#10;run  = "postgres@17"&#10;name = "mystack-db"&#10;…' class="bg-card border border-edge rounded px-2 py-1.5 text-ink font-mono placeholder:text-fade/30"></textarea>
-    </label>
-    <div>
-      <button class="bg-accent text-ground rounded px-4 py-1.5 font-bold hover:bg-accent-bright">deploy — reconcile applies it</button>
-      <span class="text-fade/35 ml-3">writes /var/lib/ply/deployments/&lt;name&gt;.toml</span>
-    </div>
-  </form>
-</details>
-{{end}}
-
-{{if eq .Tab "env"}}
-<div class="flex items-center gap-2 mb-3">
   <h2 class="text-accent/80 text-[10px] uppercase tracking-wider">shared env files</h2>
   {{template "helplink" "env"}}
+  <span class="text-fade/40 text-[10px]">({{len .EnvFiles}})</span>
 </div>
 <div class="text-fade/50 text-xs mb-3">secrets live here on the host (<span class="text-fade">deployments/.env/</span>, 0600) — specs and the fleet repo carry only the reference</div>
 <div class="space-y-2">
@@ -195,15 +92,13 @@
     <button class="text-ink/80 hover:text-white border border-edge rounded px-3 py-1.5">new env file</button>
   </form>
 </div>
-{{end}}
 
-{{end}}
 <div class="flex items-center gap-2 mt-10 mb-3">
   <h2 class="text-accent/80 text-[10px] uppercase tracking-wider">seal a secret</h2>
 </div>
 {{if .SealAvailable}}
 <div class="text-fade/50 text-xs mb-3">
-  turn a value into an <span class="text-fade">enc:v1:…</span> blob for this host — paste it into the env box above as
+  turn a value into an <span class="text-fade">enc:v1:…</span> blob for this host — paste it into a service's env as
   <span class="text-fade">KEY=enc:v1:…</span>, or any manifest's <span class="text-fade">[env]</span>. It opens only on this
   host, at launch; the dashboard can seal but never read one back.
 </div>
@@ -218,6 +113,7 @@
 <div id="sealed-out" class="mt-2"></div>
 {{else}}
 <div class="text-fade/35 text-xs">no host key on this box yet — run <span class="text-fade">sudo ply setup</span> (ply ≥ 0.1.93) and it appears here</div>
+{{end}}
 {{end}}
 {{end}}
 

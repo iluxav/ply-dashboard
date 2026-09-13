@@ -6,6 +6,8 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -381,6 +383,31 @@ func (s *server) deployNewPage(w http.ResponseWriter, r *http.Request) {
 	}
 	c, _ := cart.ReadDraft(s.depDir(), id)
 	s.render(w, "deploy_new", "base.html", s.builderData(id, c))
+}
+
+// GET /deploy/{name}/edit — open an existing deployment in the SAME builder.
+// The draft is keyed by the deployment name, so deploying overwrites it in
+// place rather than creating a duplicate. A file the builder can't model
+// (a parse error) sends you back to the deploy page's raw spec editor.
+func (s *server) deployEditBuilder(w http.ResponseWriter, r *http.Request) {
+	name := cart.SafeName(r.PathValue("name"))
+	b, err := os.ReadFile(filepath.Join(s.depDir(), name+".toml"))
+	if err != nil {
+		http.Redirect(w, r, "/deploy?err="+url.QueryEscape("no such deployment: "+name), http.StatusSeeOther)
+		return
+	}
+	c, err := cart.FromTOML(string(b))
+	if err != nil {
+		http.Redirect(w, r, "/deploy?err="+url.QueryEscape("can't open "+name+" in the builder — edit its spec on the deploy page: "+err.Error()), http.StatusSeeOther)
+		return
+	}
+	c.Name = name
+	// The draft id IS the deployment name, so promote writes <name>.toml in
+	// place. Expected-vars (.env.example) aren't re-fetched here — an edited
+	// card simply shows no "reads:" rows until re-detected; edit never blocks
+	// on the network.
+	_ = cart.WriteDraft(s.depDir(), name, c)
+	s.render(w, "deploy_new", "base.html", s.builderData(name, c))
 }
 
 // POST /deploy/detect — classify the omnibox input and preview what to add.

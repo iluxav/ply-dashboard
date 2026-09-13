@@ -184,3 +184,55 @@ func TestDraftMetaRoundTripAndDeploy(t *testing.T) {
 		t.Fatalf("meta should be removed after deploy")
 	}
 }
+
+// GET /deploy/{name}/edit reads a deployment file, parses it into cards, and
+// seeds a draft keyed by the deployment name — so deploying overwrites in
+// place. This covers that load path end-to-end (minus the thin HTTP layer).
+func TestEditLoadCompositionSeedsDraftWithNCards(t *testing.T) {
+	dir := t.TempDir()
+	spec := `[package]
+name = "shop"
+version = "0.1.0"
+
+[[service]]
+run = "postgres@17"
+name = "db"
+
+[[service]]
+run = "git+https://github.com/you/server"
+name = "server"
+build = "npm install"
+after = ["db"]
+
+[[service]]
+run = "git+https://github.com/you/web"
+name = "web"
+after = ["server"]
+`
+	c, err := FromTOML(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Cards) != 3 {
+		t.Fatalf("want 3 cards, got %d", len(c.Cards))
+	}
+	if err := WriteDraft(dir, "shop", c); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadDraft(dir, "shop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"db", "server", "web"}
+	if len(got.Cards) != len(want) {
+		t.Fatalf("draft round-trip lost cards: %d", len(got.Cards))
+	}
+	for i, w := range want {
+		if got.Cards[i].Name != w {
+			t.Fatalf("card %d name = %q want %q", i, got.Cards[i].Name, w)
+		}
+	}
+	if got.Cards[1].Kind != KindRepo || len(got.Cards[1].After) != 1 || got.Cards[1].After[0] != "db" {
+		t.Fatalf("server card lost kind/after: %+v", got.Cards[1])
+	}
+}

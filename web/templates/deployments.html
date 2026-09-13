@@ -35,7 +35,8 @@
         <button class="text-accent hover:text-accent-bright text-xs border border-deep rounded px-2 py-0.5">deploy now</button>
       </form>
       {{end}}
-      <form method="post" action="/deploy/{{.Name}}/delete" class="ml-auto"
+      <a href="/deploy/{{.Name}}/edit" class="ml-auto text-accent/80 hover:text-accent text-xs border border-deep rounded px-2 py-0.5">edit</a>
+      <form method="post" action="/deploy/{{.Name}}/delete"
             onsubmit="return confirm('Delete deployment {{.Name}}? The app stops and its unit is removed (volumes kept).')">
         <button class="text-fade/50 hover:text-red-400 text-xs">delete</button>
       </form>

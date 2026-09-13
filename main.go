@@ -11,12 +11,10 @@ import (
 	"encoding/hex"
 	"fmt"
 	"html/template"
-	"io"
 	"io/fs"
 	"log"
 	"net/http"
 	"os"
-	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -248,7 +246,6 @@ func main() {
 	mux.HandleFunc("POST /notify/save", s.guard(s.notifySave))
 	mux.HandleFunc("POST /notify/test", s.guard(s.notifyTest))
 	mux.HandleFunc("POST /secret/seal", s.guard(s.sealAction))
-	mux.HandleFunc("POST /deploy", s.guard(s.deployCreate))
 	mux.HandleFunc("POST /deploy/{name}/delete", s.guard(s.deployDelete))
 	mux.HandleFunc("GET /partials/deployments", s.guard(s.deploymentsPartial))
 	mux.HandleFunc("GET /partials/events", s.guard(s.eventsPartial))
@@ -257,19 +254,14 @@ func main() {
 	mux.HandleFunc("GET /ws/term/{name}/{n}", s.guard(s.termWS))
 	mux.HandleFunc("POST /deploy/{name}/now", s.guard(s.deployNow))
 	mux.HandleFunc("POST /deploy/{name}/edit", s.guard(s.deployEdit))
+	mux.HandleFunc("GET /deploy/{name}/edit", s.guard(s.deployEditBuilder))
 	mux.HandleFunc("POST /deploy/{name}/rollback", s.guard(s.deployRollback))
 	mux.HandleFunc("GET /partials/envpane/{name}", s.guard(s.envPane))
 	mux.HandleFunc("GET /partials/helppane/{topic}", s.guard(s.helpPane))
 	mux.HandleFunc("POST /env/create", s.guard(s.envCreate))
 	mux.HandleFunc("POST /env/save", s.guard(s.envSave))
 	mux.HandleFunc("POST /env/delete", s.guard(s.envDelete))
-	mux.HandleFunc("POST /deploy/inspect", s.guard(s.sourceInspect))
-	mux.HandleFunc("POST /deploy/registry-stack", s.guard(s.registryStackForm))
 	mux.HandleFunc("POST /deploy/enroll", s.guard(s.fleetEnroll))
-	mux.HandleFunc("POST /deploy/preview", s.guard(s.sourcePreview))
-	mux.HandleFunc("POST /deploy/source", s.guard(s.sourceCreate))
-	mux.HandleFunc("POST /deploy/raw", s.guard(s.deployRaw))
-	mux.HandleFunc("POST /deploy/stack", s.guard(s.deployStackCreate))
 	// the deploy BUILDER (the cart) — assemble 1..N services, wire, deploy
 	mux.HandleFunc("GET /deploy/new", s.guard(s.deployNewPage))
 	mux.HandleFunc("POST /deploy/detect", s.guard(s.deployDetect))
@@ -307,25 +299,24 @@ func (s *server) parseTemplates() {
 	s.pages = map[string]*template.Template{
 		"index":      page("web/templates/index.html", "web/templates/apps_table.html", "web/templates/events.html"),
 		"app":        page("web/templates/app.html", "web/templates/instances.html", "web/templates/logs.html", "web/templates/events.html"),
-		"deploy":     page("web/templates/deploy.html", "web/templates/deployments.html", "web/templates/deploy_source.html"),
+		"deploy":     page("web/templates/deploy.html", "web/templates/deployments.html"),
 		"deploy_new": page("web/templates/deploy_new.html", "web/templates/cart.html", "web/templates/detected.html", "web/templates/recipe.html"),
 		"notify":     page("web/templates/notify.html"),
 		"login":      page("web/templates/login.html"),
 		"setup":      page("web/templates/setup.html"),
 		// standalone partials for htmx polling
-		"apps_table":    template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/apps_table.html")),
-		"instances":     template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/instances.html")),
-		"logs":          template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/logs.html")),
-		"deployments":   template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/deployments.html")),
-		"cart":          template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/cart.html")),
-		"detected":      template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/detected.html")),
-		"recipe":        template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/recipe.html")),
-		"deploy_source": template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/deploy_source.html")),
-		"events":        template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/events.html")),
-		"logpane":       template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/logpane.html")),
-		"termpane":      template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/termpane.html")),
-		"envpane":       template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/envpane.html")),
-		"helppane":      template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/helppane.html")),
+		"apps_table":  template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/apps_table.html")),
+		"instances":   template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/instances.html")),
+		"logs":        template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/logs.html")),
+		"deployments": template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/deployments.html")),
+		"cart":        template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/cart.html")),
+		"detected":    template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/detected.html")),
+		"recipe":      template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/recipe.html")),
+		"events":      template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/events.html")),
+		"logpane":     template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/logpane.html")),
+		"termpane":    template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/termpane.html")),
+		"envpane":     template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/envpane.html")),
+		"helppane":    template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/helppane.html")),
 	}
 }
 
@@ -368,10 +359,8 @@ type pageData struct {
 	DeployErr      string
 	Deployments    []plystate.Deployment
 	Groups         []plystate.DeploymentGroup
-	Source         *sourceForm
 	Events         []plystate.Event
 
-	Tab         string // deploy page: "host" | "new" | "env"
 	DeployCount int
 	FleetRepo   string
 	HelpTopic   string
@@ -387,25 +376,6 @@ type pageData struct {
 	Cards      []cardView
 	Detected   *detectedView
 	RecipeTOML string
-}
-
-// sourceForm is the from-source wizard's state: inspection result plus the
-// form exactly as typed, so error re-renders never lose input.
-type sourceForm struct {
-	RepoURL    string
-	Insp       github.Inspection
-	Inspected  bool
-	Frameworks []string
-	Framework  string
-	Lane       string // "release" (CI image from GitHub releases) | "source" (build here)
-	Token      string
-	Spec       plystate.SourceSpec
-	Gh         plystate.GithubSpec
-	StackRef   string              // set when the stack came from the registry catalog
-	Stack      *plystate.StackView // parsed from the repo's stack.toml, if any
-	Mode       string              // "stack" | "single" — which form shows when both apply
-	Preview    string
-	Error      string
 }
 
 var pageSection = map[string]string{"index": "apps", "app": "apps", "deploy": "deploy", "notify": "notify"}
@@ -682,7 +652,22 @@ func (s *server) logsPartial(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) deployPage(w http.ResponseWriter, r *http.Request) {
-	s.renderDeploy(w, r.URL.Query().Get("tab"), r.URL.Query().Get("err"))
+	data := pageData{
+		Authed:          true,
+		DeployAvailable: plystate.DeploymentsAvailable(s.paths),
+		Groups:          plystate.GroupDeployments(plystate.Deployments(s.paths)),
+		DeployErr:       r.URL.Query().Get("err"),
+		Fleet:           plystate.Fleet(s.paths),
+		FleetRepo:       plystate.FleetRepo(s.paths),
+		SealAvailable:   plystate.SealAvailable(s.paths),
+	}
+	for _, g := range data.Groups {
+		data.DeployCount += len(g.Items)
+	}
+	if data.DeployAvailable {
+		data.EnvFiles, data.EnvExternal = plystate.EnvFiles(s.paths)
+	}
+	s.render(w, "deploy", "base.html", data)
 }
 
 type testResult struct {
@@ -814,43 +799,6 @@ func validEnvName(n string) bool {
 	return true
 }
 
-func (s *server) renderDeploy(w http.ResponseWriter, tab, deployErr string) {
-	s.renderDeployWith(w, tab, deployErr, nil)
-}
-
-// renderDeployWith renders the whole deploy page, optionally with the
-// from-source wizard already filled in. A fragment render is only correct
-// for htmx, which swaps into a page that already has its stylesheet; a plain
-// form POST navigates, so it must get the page and not just the piece.
-func (s *server) renderDeployWith(w http.ResponseWriter, tab, deployErr string, src *sourceForm) {
-	if tab != "new" && tab != "env" {
-		tab = "host"
-	}
-	data := pageData{
-		Source:          src,
-		Authed:          true,
-		Tab:             tab,
-		DeployAvailable: plystate.DeploymentsAvailable(s.paths),
-		Groups:          plystate.GroupDeployments(plystate.Deployments(s.paths)),
-		DeployErr:       deployErr,
-		Fleet:           plystate.Fleet(s.paths),
-		FleetRepo:       plystate.FleetRepo(s.paths),
-		SealAvailable:   plystate.SealAvailable(s.paths),
-	}
-	for _, g := range data.Groups {
-		data.DeployCount += len(g.Items)
-	}
-	if data.DeployAvailable {
-		apps, err := s.registry.Apps()
-		data.RegistryApps = apps
-		if err != nil {
-			data.RegistryErr = err.Error()
-		}
-		data.EnvFiles, data.EnvExternal = plystate.EnvFiles(s.paths)
-	}
-	s.render(w, "deploy", "base.html", data)
-}
-
 // helpPane: the right drawer as a pocket manual — every deploy-page
 // section explains itself without leaving the page.
 var helpTopics = map[string]bool{"fleet": true, "host": true, "source": true, "registry": true, "env": true}
@@ -923,43 +871,6 @@ func (s *server) envDelete(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/deploy?tab=env", http.StatusSeeOther)
 }
 
-func (s *server) deployCreate(w http.ResponseWriter, r *http.Request) {
-	// A stack deploys by reference: reconcile fetches it every beat and
-	// expands one unit per member, so none of the single-app fields below
-	// (version, publish, env) apply — they belong to the members.
-	if r.FormValue("kind") == "stack" {
-		err := plystate.WriteStackDeployment(
-			s.paths,
-			strings.TrimSpace(r.FormValue("name")),
-			strings.TrimSpace(r.FormValue("app")),
-		)
-		if err != nil {
-			http.Redirect(w, r, "/deploy?tab=new&err="+template.URLQueryEscaper(err.Error()), http.StatusSeeOther)
-			return
-		}
-		s.fresh.Kick()
-		http.Redirect(w, r, "/deploy", http.StatusSeeOther)
-		return
-	}
-	err := plystate.WriteDeployment(
-		s.paths,
-		strings.TrimSpace(r.FormValue("name")),
-		strings.TrimSpace(r.FormValue("app")),
-		strings.TrimSpace(r.FormValue("version")),
-		strings.TrimSpace(r.FormValue("publish")),
-		strings.TrimSpace(r.FormValue("domain")),
-		r.FormValue("env"),
-		strings.TrimSpace(r.FormValue("env_file")),
-		r.FormValue("grant_links") == "1",
-	)
-	if err != nil {
-		http.Redirect(w, r, "/deploy?tab=new&err="+template.URLQueryEscaper(err.Error()), http.StatusSeeOther)
-		return
-	}
-	s.fresh.Kick()
-	http.Redirect(w, r, "/deploy", http.StatusSeeOther)
-}
-
 // deployNow: the update button — touch the spec, inotify does the rest.
 func (s *server) deployNow(w http.ResponseWriter, r *http.Request) {
 	if err := plystate.TouchDeployment(s.paths, r.PathValue("name")); err != nil {
@@ -998,169 +909,6 @@ func (s *server) deployEdit(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/deploy", http.StatusSeeOther)
 }
 
-// editedMembers names the first member field the form changed from what the
-// published stack declares, or "" when nothing was touched. Disabled inputs
-// are not submitted, so with JS this never fires; without it, it is the
-// difference between a clear error and a silently ignored domain.
-func editedMembers(r *http.Request, spec string, p plystate.Paths) string {
-	view, err := plystate.ParseStack(p, spec)
-	if err != nil || view == nil {
-		return ""
-	}
-	for i, m := range view.Members {
-		for _, f := range []struct {
-			field, was string
-		}{
-			{"publish", m.PublishCSV()},
-			{"domain", m.DomainCSV()},
-		} {
-			got := r.FormValue(fmt.Sprintf("m%d_%s", i, f.field))
-			if _, ok := r.Form[fmt.Sprintf("m%d_%s", i, f.field)]; !ok {
-				continue // not submitted at all (disabled, or an older form)
-			}
-			if strings.Join(splitCSV(got), ",") != strings.Join(splitCSV(f.was), ",") {
-				return fmt.Sprintf("member %q: %s was edited", m.Name, f.field)
-			}
-		}
-	}
-	return ""
-}
-
-// registryStackForm: picking a stack from the catalog must show what it will
-// do before it does it — the same courtesy the pasted-repo lane already
-// extends. Fetch the published template, parse it, and render the very same
-// member cards and $VAR inputs; nothing is written until that form is
-// submitted.
-func (s *server) registryStackForm(w http.ResponseWriter, r *http.Request) {
-	ref := strings.TrimSpace(r.FormValue("ref"))
-	if ref == "" {
-		ref = strings.TrimSpace(r.FormValue("app")) // the catalog card's field name
-	}
-	src := strings.TrimSpace(r.FormValue("src"))
-	name := strings.TrimSpace(r.FormValue("name"))
-	form := &sourceForm{StackRef: ref, Inspected: true, Mode: "stack"}
-
-	spec, err := fetchText(src)
-	if err != nil {
-		form.Error = fmt.Sprintf("could not fetch %s: %v", src, err)
-		s.renderDeployWith(w, "new", form.Error, form)
-		return
-	}
-	form.Insp.StackToml = spec
-	form.Insp.StackName = name
-	if view, err := plystate.ParseStack(s.paths, spec); err == nil && view != nil {
-		form.Stack = view
-		if view.Name != "" {
-			form.Insp.StackName = view.Name
-		}
-	}
-	s.renderDeployWith(w, "new", "", form)
-}
-
-// fetchText pulls a small text artifact (a published stack toml) from the
-// registry. Bounded: a catalog entry is data, not a licence to stream.
-func fetchText(url string) (string, error) {
-	if !strings.HasPrefix(url, "https://") {
-		return "", fmt.Errorf("refusing a non-https source")
-	}
-	client := http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(url)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("http %d", resp.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
-	return string(body), err
-}
-
-// deployStackCreate lands the inspected-stack form: the spec verbatim plus
-// one var_<KEY> field per $VAR hole, merged into the env file the stack
-// references before the deployment file is written.
-func (s *server) deployStackCreate(w http.ResponseWriter, r *http.Request) {
-	name := strings.TrimSpace(r.FormValue("name"))
-	values := map[string]string{}
-	overrides := map[int]plystate.MemberOverride{}
-	if err := r.ParseForm(); err == nil {
-		for key := range r.PostForm {
-			if k, ok := strings.CutPrefix(key, "var_"); ok {
-				if v := r.PostForm.Get(key); v != "" {
-					values[k] = v
-				}
-				continue
-			}
-			var i int
-			var field string
-			if n, _ := fmt.Sscanf(key, "m%d_%s", &i, &field); n == 2 {
-				ov := overrides[i]
-				list := splitCSV(r.PostForm.Get(key))
-				switch field {
-				case "publish":
-					ov.Publish = list
-				case "domain":
-					ov.Domain = list
-				}
-				overrides[i] = ov
-			}
-		}
-	}
-	// Tracked: the deployment names the published stack, so the member
-	// overrides above do not apply — only the $VAR values, which still have
-	// to land in a file on this host.
-	if ref := strings.TrimSpace(r.FormValue("ref")); ref != "" && r.FormValue("track") == "1" {
-		// Refuse rather than drop. A tracked deployment is the reference and
-		// nothing else, so an override here cannot be honoured — and silently
-		// discarding a domain someone typed is how a site ends up served on a
-		// hostname they never chose.
-		if edited := editedMembers(r, r.FormValue("spec"), s.paths); edited != "" {
-			err := fmt.Sprintf("%s — a tracked deployment takes its members from the published stack; untick “track” to edit them here", edited)
-			http.Redirect(w, r, "/deploy?tab=new&err="+template.URLQueryEscaper(err), http.StatusSeeOther)
-			return
-		}
-		if err := plystate.DeployStackRef(s.paths, name, ref, r.FormValue("spec"), values); err != nil {
-			http.Redirect(w, r, "/deploy?tab=new&err="+template.URLQueryEscaper(err.Error()), http.StatusSeeOther)
-			return
-		}
-		s.fresh.Kick()
-		http.Redirect(w, r, "/deploy", http.StatusSeeOther)
-		return
-	}
-	if err := plystate.DeployStack(s.paths, name, r.FormValue("spec"), values, overrides); err != nil {
-		http.Redirect(w, r, "/deploy?tab=new&err="+template.URLQueryEscaper(err.Error()), http.StatusSeeOther)
-		return
-	}
-	s.fresh.Kick()
-	http.Redirect(w, r, "/deploy", http.StatusSeeOther)
-}
-
-// splitCSV: "a, b" → ["a","b"]. Always non-nil: a submitted-but-empty
-// field means "cleared", a nil override means "not in the form".
-func splitCSV(s string) []string {
-	out := []string{}
-	for _, part := range strings.Split(s, ",") {
-		if p := strings.TrimSpace(part); p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
-// deployRaw creates a deployment from a pasted spec — a single-app toml or
-// a whole [[app]] stack. Same philosophy as deployEdit: the file is the
-// truth, reconcile is the validator.
-func (s *server) deployRaw(w http.ResponseWriter, r *http.Request) {
-	name := strings.TrimSpace(r.FormValue("name"))
-	err := plystate.CreateRawDeployment(s.paths, name, r.FormValue("spec"))
-	if err != nil {
-		http.Redirect(w, r, "/deploy?tab=new&err="+template.URLQueryEscaper(err.Error()), http.StatusSeeOther)
-		return
-	}
-	s.fresh.Kick()
-	http.Redirect(w, r, "/deploy", http.StatusSeeOther)
-}
-
 func (s *server) deployDelete(w http.ResponseWriter, r *http.Request) {
 	if err := plystate.DeleteDeployment(s.paths, r.PathValue("name")); err != nil {
 		log.Printf("delete deployment: %v", err)
@@ -1178,193 +926,6 @@ func (s *server) deploymentsPartial(w http.ResponseWriter, _ *http.Request) {
 // historyOf: template helper for the rollback menu.
 func (s *server) historyOf(name string) []plystate.Event {
 	return plystate.History(s.paths, name, 5)
-}
-
-// --- the from-source wizard --------------------------------------------------
-
-func (s *server) renderSource(w http.ResponseWriter, form *sourceForm) {
-	form.Frameworks = github.Frameworks()
-	// A repo shipping a stack.toml is telling us how it deploys: parse it
-	// into member cards + $VAR holes. A parse failure isn't fatal — the
-	// panel falls back to the raw text with the error shown.
-	if form.Insp.StackToml != "" && form.Stack == nil {
-		if view, err := plystate.ParseStack(s.paths, form.Insp.StackToml); err == nil {
-			form.Stack = view
-		}
-	}
-	// A repo shipping a stack leads with it; an hx re-render from inside the
-	// single-app form (its hidden dmode field) keeps the user's choice.
-	if form.Mode == "" {
-		form.Mode = "single"
-		if form.Insp.StackToml != "" {
-			form.Mode = "stack"
-		}
-	}
-	s.render(w, "deploy_source", "deploy_source", pageData{Source: form})
-}
-
-// sourceInspect answers the inspect button, a lane switch, and a preset
-// switch (the latter two arrive with inspected=1 and keep typed fields).
-func (s *server) sourceInspect(w http.ResponseWriter, r *http.Request) {
-	repoURL := strings.TrimSpace(r.FormValue("repo"))
-	token := strings.TrimSpace(r.FormValue("token"))
-	form := &sourceForm{RepoURL: repoURL, Token: token}
-	if repoURL == "" {
-		form.Error = "paste a repo URL first"
-		s.renderSource(w, form)
-		return
-	}
-	insp, err := github.Inspect(repoURL, token)
-	if err != nil {
-		form.Error = err.Error()
-		s.renderSource(w, form)
-		return
-	}
-	form.Insp = insp
-	form.Inspected = true
-	if m := r.FormValue("dmode"); m == "stack" || m == "single" {
-		form.Mode = m
-	}
-
-	// the lane is a pre-answered question: releases with a ply image beat
-	// building on the droplet — but the radio lets you disagree
-	form.Lane = "source"
-	if insp.Release != nil {
-		form.Lane = "release"
-	}
-	if lane := r.FormValue("lane"); lane == "release" || lane == "source" {
-		form.Lane = lane
-	}
-	form.Framework = insp.Framework
-	if fw := r.FormValue("framework"); fw != "" {
-		form.Framework = fw
-	}
-
-	spec, gh := plystate.SourceSpec{}, plystate.GithubSpec{}
-	if r.FormValue("inspected") == "1" {
-		spec, gh = specFromForm(r), githubFromForm(r)
-	} else {
-		name := nameFromRepo(insp.CloneURL)
-		spec.Name, gh.Name = name, name
-		spec.Ref = insp.DefaultBranch
-		spec.Publish, gh.Publish = r.FormValue("publish"), r.FormValue("publish")
-	}
-	if insp.PlyComposition {
-		// The repo's ply.toml is a composition: the order is one line (repo=)
-		// and the host builds each service. No single-app preset fields.
-		spec.Composition = true
-		spec.Build, spec.Runtime, spec.Entrypoint, spec.Include, spec.Port = "", "", "", "", ""
-		form.Lane = "source"
-	} else {
-		preset := github.PresetFor(form.Framework)
-		spec.Build, spec.Runtime = preset.Build, preset.Runtime
-		spec.Entrypoint, spec.Include, spec.Port = preset.Entrypoint, preset.Include, preset.Port
-		// Detected = the host produces a runnable manifest without the order
-		// spelling out build+entrypoint: a repo with its own single-app
-		// ply.toml (the host reads it), or Next.js (the host auto-detects it).
-		// For those the order is lean — build/entrypoint are optional overrides
-		// — and publish is prefilled from the port ply ui would use.
-		switch form.Framework {
-		case "nextjs":
-			spec.Detected = true
-			if spec.Publish == "" {
-				spec.Publish = "internal:3000"
-			}
-		case "ply":
-			spec.Detected = true
-			if spec.Publish == "" && insp.AppPort != "" {
-				spec.Publish = "internal:" + insp.AppPort
-			}
-		default:
-			if spec.Publish == "" && preset.Port != "" {
-				spec.Publish = "internal:" + preset.Port
-			}
-		}
-	}
-	spec.Repo = insp.CloneURL
-	gh.Repo = insp.Repo
-	if insp.Release != nil && gh.Asset == "" {
-		gh.Asset = insp.Release.Asset
-	}
-	if gh.Name == "" {
-		gh.Name = nameFromRepo(insp.CloneURL)
-	}
-	form.Spec, form.Gh = spec, gh
-	form.Preview = previewFor(form)
-	s.renderSource(w, form)
-}
-
-func (s *server) sourcePreview(w http.ResponseWriter, r *http.Request) {
-	text, err := renderFromForm(r)
-	if err != nil {
-		fmt.Fprintf(w, `<div class="text-amber-400/90">%s</div>`, template.HTMLEscapeString(err.Error()))
-		return
-	}
-	fmt.Fprintf(w, `<pre class="border border-zinc-800 rounded px-3 py-2 text-zinc-400 overflow-x-auto">%s</pre>`, template.HTMLEscapeString(text))
-}
-
-func (s *server) sourceCreate(w http.ResponseWriter, r *http.Request) {
-	lane := r.FormValue("lane")
-	token := strings.TrimSpace(r.FormValue("token"))
-	form := &sourceForm{
-		RepoURL:   r.FormValue("repo"),
-		Inspected: true,
-		Lane:      lane,
-		Token:     token,
-		Framework: r.FormValue("framework"),
-		Spec:      specFromForm(r),
-		Gh:        githubFromForm(r),
-		Mode:      r.FormValue("dmode"),
-	}
-	fail := func(err error) {
-		form.Error = err.Error()
-		form.Preview = previewFor(form)
-		s.renderSource(w, form)
-	}
-	if _, err := renderFromForm(r); err != nil { // validate before touching disk
-		fail(err)
-		return
-	}
-	services := selectedServices(r)
-	if lane == "release" {
-		gh := form.Gh
-		if err := s.wireStack(gh.Name, services, &gh.Stack, &gh.After, &gh.Env); err != nil {
-			fail(err)
-			return
-		}
-		if token != "" {
-			ref, err := plystate.WriteToken(s.paths, gh.Name, token)
-			if err != nil {
-				fail(err)
-				return
-			}
-			gh.TokenFile = ref
-		}
-		if err := plystate.WriteGithubDeployment(s.paths, gh); err != nil {
-			fail(err)
-			return
-		}
-	} else {
-		spec := form.Spec
-		if err := s.wireStack(spec.Name, services, &spec.Stack, &spec.After, &spec.Env); err != nil {
-			fail(err)
-			return
-		}
-		if token != "" {
-			ref, err := plystate.WriteToken(s.paths, spec.Name, token)
-			if err != nil {
-				fail(err)
-				return
-			}
-			spec.TokenFile = ref
-		}
-		if err := plystate.WriteSourceDeployment(s.paths, spec); err != nil {
-			fail(err)
-			return
-		}
-	}
-	s.fresh.Kick()
-	w.Header().Set("HX-Redirect", "/deploy")
 }
 
 // fleetEnroll: pasting an infra repo enrolls the host — the config is a
@@ -1389,128 +950,6 @@ func (s *server) fleetEnroll(w http.ResponseWriter, r *http.Request) {
 	}
 	s.fresh.Kick()
 	http.Redirect(w, r, "/deploy", http.StatusSeeOther)
-}
-
-// renderFromForm builds the lane's spec exactly as create would (token
-// reference included) — the preview and the written file cannot diverge.
-func renderFromForm(r *http.Request) (string, error) {
-	token := strings.TrimSpace(r.FormValue("token"))
-	if r.FormValue("lane") == "release" {
-		gh := githubFromForm(r)
-		if token != "" {
-			gh.TokenFile = ".keys/" + gh.Name + ".token"
-		}
-		return gh.Render()
-	}
-	spec := specFromForm(r)
-	if token != "" {
-		spec.TokenFile = ".keys/" + spec.Name + ".token"
-	}
-	return spec.Render()
-}
-
-func previewFor(form *sourceForm) string {
-	if form.Lane == "release" {
-		gh := form.Gh
-		if form.Token != "" {
-			gh.TokenFile = ".keys/" + gh.Name + ".token"
-		}
-		text, err := gh.Render()
-		if err != nil {
-			return ""
-		}
-		return text
-	}
-	spec := form.Spec
-	if form.Token != "" {
-		spec.TokenFile = ".keys/" + spec.Name + ".token"
-	}
-	text, err := spec.Render()
-	if err != nil {
-		return ""
-	}
-	return text
-}
-
-func specFromForm(r *http.Request) plystate.SourceSpec {
-	return plystate.SourceSpec{
-		Name:        strings.TrimSpace(r.FormValue("name")),
-		Repo:        strings.TrimSpace(r.FormValue("repo")),
-		Ref:         strings.TrimSpace(r.FormValue("ref")),
-		Build:       strings.TrimSpace(r.FormValue("build")),
-		Runtime:     strings.TrimSpace(r.FormValue("runtime")),
-		Entrypoint:  strings.TrimSpace(r.FormValue("entrypoint")),
-		Include:     strings.TrimSpace(r.FormValue("include")),
-		Port:        strings.TrimSpace(r.FormValue("port")),
-		Publish:     strings.TrimSpace(r.FormValue("publish")),
-		Domain:      strings.TrimSpace(r.FormValue("domain")),
-		Env:         r.FormValue("env"),
-		Manual:      r.FormValue("manual") == "1",
-		Composition: r.FormValue("composition") == "1",
-		Detected:    r.FormValue("detected") == "1",
-	}
-}
-
-// selectedServices reads the wizard's "needs a database?" checkboxes.
-func selectedServices(r *http.Request) []plystate.StackService {
-	var out []plystate.StackService
-	for _, svc := range plystate.StackServices() {
-		if r.FormValue("svc_"+svc.App) == "1" {
-			out = append(out, svc)
-		}
-	}
-	return out
-}
-
-// wireStack decorates the main spec for its services and writes the
-// service specs. One generated password per service, shared with the app
-// through [env] — the app finds the address via the discovery vars
-// (<APP>_HOST/_PORT) that `after` injects at start.
-func (s *server) wireStack(name string, services []plystate.StackService, stack, after, env *string) error {
-	if len(services) == 0 {
-		return nil
-	}
-	*stack = name
-	var afters []string
-	for _, svc := range services {
-		password := make([]byte, 12)
-		if _, err := rand.Read(password); err != nil {
-			return err
-		}
-		pw := hex.EncodeToString(password)
-		if _, err := plystate.WriteServiceSpec(s.paths, name, svc, pw); err != nil {
-			return err
-		}
-		afters = append(afters, svc.App)
-		*env = strings.TrimRight(*env, "\n") + "\n" + svc.EnvKey + "=" + pw + "\n"
-	}
-	*after = strings.Join(afters, ", ")
-	return nil
-}
-
-func githubFromForm(r *http.Request) plystate.GithubSpec {
-	return plystate.GithubSpec{
-		Name:      strings.TrimSpace(r.FormValue("name")),
-		Repo:      strings.TrimSpace(r.FormValue("gh_repo")),
-		Asset:     strings.TrimSpace(r.FormValue("gh_asset")),
-		Version:   strings.TrimSpace(r.FormValue("gh_version")),
-		TagPrefix: strings.TrimSpace(r.FormValue("gh_tag_prefix")),
-		Publish:   strings.TrimSpace(r.FormValue("publish")),
-		Domain:    strings.TrimSpace(r.FormValue("domain")),
-		Env:       r.FormValue("env"),
-		Manual:    r.FormValue("manual") == "1",
-	}
-}
-
-var nameSanitize = regexp.MustCompile(`[^a-z0-9-]+`)
-
-func nameFromRepo(repo string) string {
-	base := strings.ToLower(path.Base(strings.TrimSuffix(repo, ".git")))
-	base = strings.Trim(nameSanitize.ReplaceAllString(base, "-"), "-")
-	if base == "" {
-		base = "app"
-	}
-	return base
 }
 
 // logLines merges instance rings, prefixing when there are several.
