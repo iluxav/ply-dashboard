@@ -161,3 +161,17 @@ func TestLiveImageRelease(t *testing.T) {
 		t.Error("version empty")
 	}
 }
+
+func TestParseEnvKeys(t *testing.T) {
+	// comments, blanks, `export `, an empty value, a spaced key, a no-`=` junk
+	// line, and a duplicate — order-preserving, deduped.
+	body := "# a comment\n\nexport FOO=1\nBAR=\n  BAZ = qux \nnot a key line\nFOO=2\n#DB=x\nEMPTY_OK=\n"
+	got := parseEnvKeys(body)
+	want := []string{"FOO", "BAR", "BAZ", "EMPTY_OK"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("parseEnvKeys = %v, want %v", got, want)
+	}
+	if len(parseEnvKeys("")) != 0 {
+		t.Fatal("empty body should yield no keys")
+	}
+}

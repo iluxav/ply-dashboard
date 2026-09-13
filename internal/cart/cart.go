@@ -7,6 +7,7 @@
 package cart
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -351,8 +352,54 @@ func ReadDraft(depDir, id string) (Cart, error) {
 	return FromTOML(string(b))
 }
 
-// DeleteDraft removes a draft (best-effort).
-func DeleteDraft(depDir, id string) { _ = os.Remove(draftPath(depDir, id)) }
+// DeleteDraft removes a draft and its meta sidecar (best-effort).
+func DeleteDraft(depDir, id string) {
+	_ = os.Remove(draftPath(depDir, id))
+	_ = os.Remove(metaPath(depDir, id))
+}
+
+// --- draft meta (UI sidecar, NOT part of the deployed TOML) ------------------
+// Expected env vars (from a repo's .env.example) are wizard metadata, keyed by
+// the source ref (stable across rename/reorder, unlike the card index). They
+// live beside the draft as .drafts/<id>.meta.json — the stack parser rejects
+// unknown member keys, so they must never enter the deployed file — and retire
+// with the draft on promote.
+
+// DraftMeta maps a card's source ref → the env-var keys its .env.example lists.
+type DraftMeta map[string][]string
+
+func metaPath(depDir, id string) string {
+	return filepath.Join(draftsDir(depDir), SafeName(id)+".meta.json")
+}
+
+// ReadMeta loads the expected-env sidecar; a missing file is an empty map.
+func ReadMeta(depDir, id string) DraftMeta {
+	b, err := os.ReadFile(metaPath(depDir, id))
+	if err != nil {
+		return DraftMeta{}
+	}
+	var m DraftMeta
+	if json.Unmarshal(b, &m) != nil || m == nil {
+		return DraftMeta{}
+	}
+	return m
+}
+
+// WriteMeta saves the expected-env sidecar atomically (temp + rename).
+func WriteMeta(depDir, id string, m DraftMeta) error {
+	if err := os.MkdirAll(draftsDir(depDir), 0o755); err != nil {
+		return err
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return err
+	}
+	tmp := metaPath(depDir, id) + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, metaPath(depDir, id))
+}
 
 // Deploy writes the cart's FINAL TOML to <deployments>/<name>.toml atomically
 // (temp inside the ignored .drafts dir, then rename into place so reconcile

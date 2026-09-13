@@ -84,6 +84,7 @@ type cardView struct {
 	Others      []otherRef  // peers — for the `after` checkboxes and the connect picker
 	AfterInject []afterHint // this card's checked afters → the env prefixes ply injects
 	DBs         []string    // peer databases — for the DATABASE_URL one-click
+	Expects     []string    // env-var keys this app reads (from its .env.example)
 	EnvText     string      // env as KEY=VALUE lines
 	PublishText string      // publish, one per line
 	DomainText  string
@@ -244,7 +245,7 @@ func splitLines(s string) []string {
 
 func (s *server) depDir() string { return s.paths.Deployments }
 
-func toCardView(c cart.Card, i int, all []cart.Card) cardView {
+func toCardView(c cart.Card, i int, all []cart.Card, meta cart.DraftMeta) cardView {
 	others := make([]otherRef, 0, len(all))
 	var dbs []string
 	for j, o := range all {
@@ -263,6 +264,7 @@ func toCardView(c cart.Card, i int, all []cart.Card) cardView {
 	}
 	return cardView{
 		Index: i, C: c, Others: others, AfterInject: hints, DBs: dbs,
+		Expects:     meta[c.Ref],
 		EnvText:     strings.Join(c.Env, "\n"),
 		PublishText: strings.Join(c.Publish, "\n"),
 		DomainText:  strings.Join(c.Domain, "\n"),
@@ -270,10 +272,10 @@ func toCardView(c cart.Card, i int, all []cart.Card) cardView {
 	}
 }
 
-func cardViews(cs []cart.Card) []cardView {
+func cardViews(cs []cart.Card, meta cart.DraftMeta) []cardView {
 	out := make([]cardView, len(cs))
 	for i, c := range cs {
-		out[i] = toCardView(c, i, cs)
+		out[i] = toCardView(c, i, cs, meta)
 	}
 	return out
 }
@@ -307,12 +309,13 @@ func parseCardForm(r *http.Request) cart.Card {
 }
 
 func (s *server) builderData(draftID string, c cart.Cart) pageData {
+	meta := cart.ReadMeta(s.depDir(), draftID)
 	return pageData{
 		Authed:          true,
 		DeployAvailable: plystate.DeploymentsAvailable(s.paths),
 		DraftID:         draftID,
 		CartName:        c.Name,
-		Cards:           cardViews(c.Cards),
+		Cards:           cardViews(c.Cards, meta),
 	}
 }
 
@@ -343,6 +346,13 @@ func (s *server) deployDetect(w http.ResponseWriter, r *http.Request) {
 		}
 		d.Note = insp.Note
 		d.Card = cardFromInspection(insp, in)
+		// remember what the app declares it reads (.env.example), keyed by the
+		// card's ref so it survives rename/reorder; the card view shows it.
+		if len(insp.EnvExample) > 0 {
+			m := cart.ReadMeta(s.depDir(), id)
+			m[d.Card.Ref] = insp.EnvExample
+			_ = cart.WriteMeta(s.depDir(), id, m)
+		}
 	case "registry":
 		apps, err := s.registry.Apps()
 		if err != nil {

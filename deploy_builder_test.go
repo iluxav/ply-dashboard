@@ -21,7 +21,7 @@ func TestCartRendersServicesWithWiring(t *testing.T) {
 	data := pageData{DraftID: "d1", Cards: cardViews([]cart.Card{
 		{Name: "db", Kind: cart.KindRegistry, Ref: "postgres@17", Publish: []string{"internal:5432"}},
 		{Name: "web", Kind: cart.KindRepo, Ref: "https://github.com/you/web", Build: "npm install", After: []string{"db"}},
-	})}
+	}, nil)}
 	var b strings.Builder
 	if err := tmpl.ExecuteTemplate(&b, "cart", data); err != nil {
 		t.Fatal(err)
@@ -169,7 +169,7 @@ func TestCartShowsWiringAffordances(t *testing.T) {
 	data := pageData{DraftID: "d1", Cards: cardViews([]cart.Card{
 		{Name: "postgres", Kind: cart.KindRegistry, Ref: "postgres@17"},
 		{Name: "server", Kind: cart.KindRepo, Ref: "https://github.com/you/server", After: []string{"postgres"}},
-	})}
+	}, cart.DraftMeta{"https://github.com/you/server": {"DATABASE_URL", "PORT"}})}
 	var b strings.Builder
 	if err := tmpl.ExecuteTemplate(&b, "cart", data); err != nil {
 		t.Fatal(err)
@@ -178,7 +178,13 @@ func TestCartShowsWiringAffordances(t *testing.T) {
 	// the server card offers the connect picker (service → exposed field →
 	// your env var) and the "injected free" hint naming POSTGRES_HOST/PORT.
 	// No auto-wiring button: the user maps what a service exposes themselves.
-	for _, want := range []string{"+ connect a service", "it exposes", "the name your app reads", "POSTGRES_HOST", "POSTGRES_PORT", `name="service"`} {
+	for _, want := range []string{
+		"+ connect a service", "it exposes", "the name your app reads",
+		"POSTGRES_HOST", "POSTGRES_PORT", `name="service"`,
+		// the .env.example "reads:" hint + the pick-or-type datalist
+		"reads:", "DATABASE_URL", ".env.example",
+		`list="expects-1"`, `<datalist id="expects-1"`,
+	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("cart wiring missing %q in:\n%s", want, out)
 		}

@@ -43,6 +43,11 @@ type Inspection struct {
 	// the way `ply ui` does — the host reads the recipe from the ply.toml, so
 	// the order needs no build/entrypoint, just the publish override.
 	AppPort string
+	// EnvExample: the env-var KEYS an app declares it reads, parsed from the
+	// repo's `.env.example` (or `.env.sample`/`.env.template`). Developer
+	// intent, not a guess — the wizard shows "reads: …" and offers these as
+	// pick-or-type targets when mapping a peer's exposed field to an env var.
+	EnvExample []string
 }
 
 // Release: the CI-image lane's offer — the latest release ships a ply
@@ -247,6 +252,17 @@ func (i *Inspection) probe(token string) {
 		hasRust = true
 		i.Markers = append(i.Markers, "Cargo.toml")
 	}
+	// What env the app declares it reads — the developer's own list, if they
+	// ship one. .env.example is the convention; .env.sample/.env.template are
+	// the common variants.
+	for _, f := range []string{".env.example", ".env.sample", ".env.template"} {
+		if status, body := raw(f); status == http.StatusOK {
+			if i.EnvExample = parseEnvKeys(string(body)); len(i.EnvExample) > 0 {
+				i.Markers = append(i.Markers, f)
+			}
+			break
+		}
+	}
 
 	switch {
 	case i.PlyComposition:
@@ -271,6 +287,31 @@ func (i *Inspection) probe(token string) {
 		i.Framework = "unknown"
 		i.Note = "no framework markers found — pick a preset or fill the form yourself"
 	}
+}
+
+// parseEnvKeys pulls the env-var KEYS out of a `.env.example` body — the names
+// an app declares it reads. Skips blank lines and `#` comments, strips an
+// optional leading `export `, takes the text before the first `=`, and drops
+// anything empty or containing whitespace (not a valid key). Order-preserving
+// and deduped.
+func parseEnvKeys(body string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		line = strings.TrimPrefix(line, "export ")
+		key, _, _ := strings.Cut(line, "=")
+		key = strings.TrimSpace(key)
+		if key == "" || strings.ContainsAny(key, " \t") || seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, key)
+	}
+	return out
 }
 
 // NextjsBuild is the exact build command the ply host (v0.1.99+) synthesizes

@@ -47,6 +47,12 @@
           <label class="flex flex-col gap-0.5 col-span-2"><span class="text-fade/50">env · KEY=VALUE per line</span>
             <textarea name="env" rows="2" spellcheck="false"
                    class="bg-card border border-edge/60 rounded px-2 py-1 text-ink font-mono focus:border-accent/50 outline-none">{{.EnvText}}</textarea></label>
+          {{if .Expects}}
+          <div class="col-span-2 text-fade/40 text-[11px] -mt-0.5">
+            reads: {{range $j, $k := .Expects}}{{if $j}}, {{end}}<code class="text-fade/60">{{$k}}</code>{{end}}
+            <span class="text-fade/30">· from .env.example</span>
+          </div>
+          {{end}}
           {{if .Others}}
           <div class="col-span-2 flex items-center gap-2 flex-wrap">
             <span class="text-fade/50">starts after</span>
@@ -89,10 +95,11 @@
                 <option value="version">version</option>
               </select></label>
             <label class="flex flex-col gap-0.5"><span class="text-fade/40">as env var</span>
-              <input name="key" placeholder="the name your app reads" spellcheck="false"
+              <input name="key" placeholder="the name your app reads" spellcheck="false" list="expects-{{.Index}}"
                      class="bg-card border border-edge/60 rounded px-1.5 py-1 text-ink font-mono w-48 outline-none focus:border-accent/50"></label>
             <button class="text-accent/90 hover:text-accent border border-accent/40 hover:border-accent/70 rounded px-2.5 py-1">insert</button>
           </form>
+          {{if .Expects}}<datalist id="expects-{{.Index}}">{{range .Expects}}<option value="{{.}}">{{end}}</datalist>{{end}}
           <div class="text-fade/30 mt-1">these are the fields <span class="text-fade/55">that service</span> exposes — pick one and name the env var <span class="text-fade/55">your app</span> reads. writes <code>KEY={service.field}</code>; ply resolves it at deploy (a database's <code>url</code> carries its sealed password).</div>
         </details>
       </div>

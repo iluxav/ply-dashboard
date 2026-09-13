@@ -1,6 +1,7 @@
 package cart
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -154,5 +155,32 @@ func TestReadMissingDraftIsEmpty(t *testing.T) {
 	c, err := ReadDraft(t.TempDir(), "nope")
 	if err != nil || len(c.Cards) != 0 {
 		t.Fatalf("missing draft should be empty cart, got %+v (%v)", c, err)
+	}
+}
+
+func TestDraftMetaRoundTripAndDeploy(t *testing.T) {
+	dep := t.TempDir()
+	ref := "https://github.com/you/server"
+	// missing → empty map, never nil-panicking
+	if m := ReadMeta(dep, "d1"); len(m) != 0 {
+		t.Fatalf("missing meta should be empty, got %v", m)
+	}
+	if err := WriteMeta(dep, "d1", DraftMeta{ref: {"DATABASE_URL", "PORT"}}); err != nil {
+		t.Fatal(err)
+	}
+	got := ReadMeta(dep, "d1")
+	if fmt.Sprint(got[ref]) != fmt.Sprint([]string{"DATABASE_URL", "PORT"}) {
+		t.Fatalf("meta round-trip wrong: %v", got)
+	}
+	// meta must NOT sit in the deployments root and must retire on deploy
+	if _, err := os.Stat(filepath.Join(dep, ".drafts", "d1.meta.json")); err != nil {
+		t.Fatalf("meta not in .drafts: %v", err)
+	}
+	c := Cart{Name: "app", Cards: []Card{{Name: "server", Kind: KindRepo, Ref: ref}}}
+	if err := Deploy(dep, "d1", "app", c); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dep, ".drafts", "d1.meta.json")); !os.IsNotExist(err) {
+		t.Fatalf("meta should be removed after deploy")
 	}
 }
