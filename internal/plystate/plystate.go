@@ -209,6 +209,7 @@ func List(p Paths) ([]Instance, error) {
 // App is the overview row: one app, its live instances aggregated.
 type App struct {
 	Name      string
+	Stack     string // the composition this app is a member of, or "" — set by AppsWithStacks, used to group the overview
 	Instances []Instance
 }
 
@@ -300,6 +301,27 @@ func Apps(instances []Instance) []App {
 		out = append(out, App{Name: n, Instances: byName[n]})
 	}
 	return out
+}
+
+// AppsWithStacks tags each app with the stack it belongs to (from the
+// `.status/<name>.members` files, via StackMembers) and orders the list so a
+// stack's members sit together: standalone apps first, then each stack as a
+// contiguous alphabetical run. The overview groups by the Stack field.
+func AppsWithStacks(instances []Instance, members map[string]string) []App {
+	apps := Apps(instances)
+	if len(members) == 0 {
+		return apps
+	}
+	for i := range apps {
+		apps[i].Stack = members[apps[i].Name]
+	}
+	sort.SliceStable(apps, func(a, b int) bool {
+		if apps[a].Stack != apps[b].Stack {
+			return apps[a].Stack < apps[b].Stack // "" (standalone) sorts first
+		}
+		return apps[a].Name < apps[b].Name
+	})
+	return apps
 }
 
 // LogTail returns the last `lines` lines of an instance's ring

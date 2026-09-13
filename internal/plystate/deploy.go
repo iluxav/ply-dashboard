@@ -19,6 +19,7 @@ type Deployment struct {
 	Name   string
 	Spec   string // raw TOML, shown verbatim — the file IS the truth
 	Status *DeployStatus
+	Recipe string // for a repo= composition: the deployed ply.toml, read-only (empty otherwise)
 }
 
 type DeployStatus struct {
@@ -76,6 +77,9 @@ func Deployments(p Paths) []Deployment {
 				d.Status = &st
 			}
 		}
+		if recipe, err := os.ReadFile(filepath.Join(p.Deployments, ".status", name+".stack.toml")); err == nil {
+			d.Recipe = string(recipe)
+		}
 		out = append(out, d)
 	}
 	sort.Slice(out, func(a, b int) bool { return out[a].Name < out[b].Name })
@@ -100,7 +104,39 @@ func OneDeployment(p Paths, name string) (Deployment, bool) {
 			d.Status = &s
 		}
 	}
+	if recipe, err := os.ReadFile(filepath.Join(p.Deployments, ".status", name+".stack.toml")); err == nil {
+		d.Recipe = string(recipe)
+	}
 	return d, true
+}
+
+// StackMembers maps each app that belongs to a stack deployment to that
+// stack's name, from the `.status/<name>.members` files ply writes for every
+// composition (one member app-name per line). A host with no stacks — or an
+// older ply that wrote none — yields an empty map, never an error.
+func StackMembers(p Paths) map[string]string {
+	dir := filepath.Join(p.Deployments, ".status")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	out := map[string]string{}
+	for _, e := range entries {
+		stack, found := strings.CutSuffix(e.Name(), ".members")
+		if !found || strings.HasPrefix(stack, ".") {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(raw), "\n") {
+			if app := strings.TrimSpace(line); app != "" {
+				out[app] = stack
+			}
+		}
+	}
+	return out
 }
 
 // RewriteDeployment saves an edited spec verbatim. Validation is minimal

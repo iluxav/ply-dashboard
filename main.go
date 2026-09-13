@@ -1514,7 +1514,7 @@ func (s *server) apps() []plystate.App {
 	if err != nil {
 		log.Printf("state: %v", err)
 	}
-	return plystate.Apps(instances)
+	return plystate.AppsWithStacks(instances, plystate.StackMembers(s.paths))
 }
 
 func (s *server) app(name string) (plystate.App, bool) {

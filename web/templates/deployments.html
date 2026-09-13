@@ -65,6 +65,13 @@
         </div>
       </form>
     </details>
+    {{if .Recipe}}
+    <details class="mt-1">
+      <summary class="text-fade/50 text-xs cursor-pointer hover:text-fade">composition · recipe (read-only)</summary>
+      <pre class="mt-1 w-full bg-card border border-edge/60 rounded px-3 py-2 text-fade/80 text-xs font-mono overflow-x-auto whitespace-pre">{{.Recipe}}</pre>
+      <div class="text-fade/35 text-xs mt-0.5">the deployed ply.toml — its [[service]] members. Edit it in the repo, not here.</div>
+    </details>
+    {{end}}
   </div>
 {{end}}
   </div>
