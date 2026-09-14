@@ -94,9 +94,12 @@
   }
   var t; input.addEventListener('input', function(){ clearTimeout(t); t=setTimeout(paint,150); });
   paint();
-  // after a service is added the cart is swapped — clear the omnibox + preview
+  // The cart is swapped by MANY ops (add, reorder, map/remap/unmap, remove).
+  // Only an actual ADD leaves text in the omnibox to clear — so only then do we
+  // clear + re-focus it. Focusing on every op would scroll the top-of-page
+  // omnibox into view and yank the reader up mid-edit.
   document.body.addEventListener('htmx:afterSwap', function(e){
-    if(e.target && e.target.id==='cart'){
+    if(e.target && e.target.id==='cart' && input.value !== ''){
       var d=document.getElementById('detected'); if(d) d.innerHTML='';
       input.value=''; paint(); input.focus();
     }

@@ -48,6 +48,17 @@ document.addEventListener('htmx:afterSwap', e => {
   const pre = e.target.querySelector && e.target.querySelector('pre[data-logs]');
   if (pre && (e.target._logsPinned !== false)) pre.scrollTop = pre.scrollHeight;
 });
+// Keep the page where the reader left it across htmx swaps — swapping a tall
+// container (#cart, #live) reflows the page and the browser would otherwise
+// reset window scroll, making every click feel like a full reload. Runs on
+// document (after body listeners), so it wins over any per-page re-focus.
+// Log/term panes scroll their own <pre>, which window scroll doesn't touch.
+let _scrollY = null;
+document.addEventListener('htmx:beforeSwap', () => { _scrollY = window.scrollY; });
+document.addEventListener('htmx:afterSwap', () => {
+  if (_scrollY !== null && _scrollY !== window.scrollY) window.scrollTo(0, _scrollY);
+  _scrollY = null;
+});
 document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('pre[data-logs]').forEach(p => p.scrollTop = p.scrollHeight);
   const saved = localStorage.getItem('drawerW');
