@@ -243,6 +243,8 @@ func main() {
 	mux.HandleFunc("POST /app/{name}/restore", s.guard(s.restoreAction))
 	mux.HandleFunc("POST /app/{name}/domain/add", s.guard(s.appDomainAdd))
 	mux.HandleFunc("POST /app/{name}/domain/remove", s.guard(s.appDomainRemove))
+	mux.HandleFunc("POST /app/{name}/secret/set", s.guard(s.appSecretSet))
+	mux.HandleFunc("POST /app/{name}/secret/remove", s.guard(s.appSecretRemove))
 	mux.HandleFunc("GET /deploy", s.guard(s.deployPage))
 	mux.HandleFunc("GET /notify", s.guard(s.notifyPage))
 	mux.HandleFunc("POST /notify/save", s.guard(s.notifySave))
@@ -301,7 +303,7 @@ func (s *server) parseTemplates() {
 	}
 	s.pages = map[string]*template.Template{
 		"index":      page("web/templates/index.html", "web/templates/apps_table.html", "web/templates/events.html"),
-		"app":        page("web/templates/app.html", "web/templates/instances.html", "web/templates/logs.html", "web/templates/events.html", "web/templates/app_domains.html"),
+		"app":        page("web/templates/app.html", "web/templates/instances.html", "web/templates/logs.html", "web/templates/events.html", "web/templates/app_domains.html", "web/templates/app_config.html"),
 		"deploy":     page("web/templates/deploy.html", "web/templates/deployments.html"),
 		"deploy_new": page("web/templates/deploy_new.html", "web/templates/cart.html", "web/templates/detected.html", "web/templates/recipe.html"),
 		"notify":     page("web/templates/notify.html"),
@@ -317,6 +319,7 @@ func (s *server) parseTemplates() {
 		"recipe":      template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/recipe.html")),
 		"events":      template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/events.html")),
 		"app-domains": template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/app_domains.html")),
+		"app-secrets": template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/app_config.html")),
 		"logpane":     template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/logpane.html")),
 		"termpane":    template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/termpane.html")),
 		"envpane":     template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/envpane.html")),
@@ -333,7 +336,8 @@ type pageData struct {
 	Apps       []plystate.App
 	AppName    string
 	App        plystate.App
-	Domains    []string // the deployment's attached domains (source of truth, not live state)
+	Domains    []string     // the deployment's attached domains (source of truth, not live state)
+	Secrets    []secretView // the app's secret env keys (names only — values never leave the host)
 	Instances  []plystate.Instance
 	Commands   []command
 	Slot       uint32
@@ -495,12 +499,64 @@ func (s *server) appPage(w http.ResponseWriter, r *http.Request) {
 	data.Events = plystate.Events(s.paths, name, 15)
 	data.DeployAvailable = plystate.DeploymentsAvailable(s.paths)
 	data.Domains = plystate.AttachedDomains(s.paths, name)
+	data.Secrets = s.appSecrets(name)
 	data.Error = r.URL.Query().Get("err")
 	s.render(w, "app", "base.html", data)
 }
 
 // appDomainAdd / appDomainRemove attach or detach a domain on the deployment
 // that owns this app, then redirect back to the app page.
+// secretView is one 🔒 config var for the app page: its KEY and whether a
+// value is actually stored (a declared-but-unbacked key fails reconcile).
+type secretView struct {
+	Key    string
+	Backed bool
+}
+
+// appSecrets is the app's secret env keys with their backed state, for the
+// panel — names only, never values.
+func (s *server) appSecrets(app string) []secretView {
+	keys := plystate.AttachedSecretKeys(s.paths, app)
+	out := make([]secretView, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, secretView{Key: k, Backed: plystate.SecretBacked(s.paths, app, k)})
+	}
+	return out
+}
+
+// appSecretSet / appSecretRemove: post-deploy 🔒 config vars on the app page.
+// The value goes host-only into the secret store; the deployment gains the KEY
+// in secret_env (lossless round-trip). Reconcile injects it on the next beat.
+func (s *server) appSecretSet(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	errStr := ""
+	if err := plystate.AddSecretForApp(s.paths, name, strings.TrimSpace(r.FormValue("key")), r.FormValue("value")); err != nil {
+		errStr = err.Error()
+	} else {
+		s.fresh.Kick()
+	}
+	s.renderAppSecrets(w, name, errStr)
+}
+
+func (s *server) appSecretRemove(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	errStr := ""
+	if err := plystate.RemoveSecretForApp(s.paths, name, strings.TrimSpace(r.FormValue("key"))); err != nil {
+		errStr = err.Error()
+	} else {
+		s.fresh.Kick()
+	}
+	s.renderAppSecrets(w, name, errStr)
+}
+
+func (s *server) renderAppSecrets(w http.ResponseWriter, name, errStr string) {
+	s.render(w, "app-secrets", "app-secrets", pageData{
+		AppName: name,
+		Secrets: s.appSecrets(name),
+		Error:   errStr,
+	})
+}
+
 func (s *server) appDomainAdd(w http.ResponseWriter, r *http.Request) {
 	s.domainEdit(w, r, plystate.AddDomain)
 }

@@ -1,0 +1,36 @@
+{{define "app-secrets"}}
+{{with .Error}}<div class="text-red-400 text-xs mb-2 border border-red-900/60 rounded px-3 py-2">{{.}}</div>{{end}}
+<div class="space-y-2 max-w-2xl">
+  {{range .Secrets}}
+  <div class="flex items-center gap-3 text-xs border border-edge rounded px-3 py-2">
+    <span class="text-accent/70 shrink-0">🔒</span>
+    <code class="text-ink font-mono">{{.Key}}</code>
+    {{if .Backed}}<span class="text-fade/40 font-mono tracking-widest">••••••••</span>
+    {{else}}<span class="text-amber-500/80" title="declared but no value stored — set it below">⚠ no value yet</span>{{end}}
+    <span class="text-fade/35 ml-auto shrink-0">injected at runtime</span>
+    <button title="remove" class="text-fade/50 hover:text-red-400 shrink-0"
+            hx-post="/app/{{$.AppName}}/secret/remove" hx-vals='{"key":"{{.Key}}"}'
+            hx-target="#app-secrets" hx-swap="innerHTML"
+            hx-confirm="Remove {{.Key}}? Its value is deleted from this host and stops being injected on the next reconcile beat.">×</button>
+  </div>
+  {{else}}
+  <div class="text-fade/50 text-xs">no secrets set — add one below</div>
+  {{end}}
+  <form hx-post="/app/{{.AppName}}/secret/set" hx-target="#app-secrets" hx-swap="innerHTML"
+        class="flex items-center gap-2 text-xs" autocomplete="off"
+        hx-on::after-request="this.reset()">
+    <input name="key" placeholder="STRIPE_KEY" spellcheck="false" autocomplete="off" required
+           pattern="[A-Za-z_][A-Za-z0-9_]*" title="an environment variable name"
+           class="bg-card border border-edge rounded px-2 py-1.5 text-ink font-mono w-48 focus:border-accent/60 outline-none">
+    <input name="value" type="password" placeholder="value (stored on this host only)" autocomplete="new-password" required
+           class="bg-card border border-edge rounded px-2 py-1.5 text-ink font-mono w-64 focus:border-accent/60 outline-none">
+    <button class="bg-accent/90 hover:bg-accent text-ground font-bold rounded px-3 py-1.5">set secret</button>
+    <span class="htmx-indicator text-accent/80">◌ saving…</span>
+  </form>
+</div>
+<div class="text-fade/35 text-xs mt-2 max-w-2xl">
+  a secret's value lives only on this host (<code class="text-fade/60">0600</code>, out of the deployment file and git);
+  the deployment records just the <span class="text-fade/60">key</span> in <code class="text-fade/60">secret_env</code>.
+  ply injects it into <span class="text-fade/60">{{.AppName}}</span> at runtime. The value can be set or rotated here — never read back.
+</div>
+{{end}}

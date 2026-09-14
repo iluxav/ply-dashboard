@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"html/template"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -93,6 +94,7 @@ type cardView struct {
 	WireKeys    []string          // need-first rows: Expects ∪ keys already set, in order
 	EnvMap      map[string]string // KEY→VALUE from the card's env (for the mapped/unmapped rows)
 	Wire        []wireRow         // one need-first row per WireKey, with its current source parsed out
+	SecretEnv   []string          // secret env keys (values live in the host store, shown masked)
 	EnvText     string            // env as KEY=VALUE lines (the raw escape hatch)
 	PublishText string            // publish, one per line
 	DomainText  string
@@ -379,6 +381,7 @@ func toCardView(c cart.Card, i int, all []cart.Card, meta cart.DraftMeta) cardVi
 		WireKeys:    keys,
 		EnvMap:      em,
 		Wire:        wireRows(keys, em),
+		SecretEnv:   c.SecretEnv,
 		EnvText:     strings.Join(c.Env, "\n"),
 		PublishText: strings.Join(c.Publish, "\n"),
 		DomainText:  strings.Join(c.Domain, "\n"),
@@ -591,11 +594,51 @@ func (s *server) deployCardOp(w http.ResponseWriter, r *http.Request) {
 		addEnvRef(&c.Cards[i], r.FormValue("service"), r.FormValue("field"), r.FormValue("key"))
 	case "usedb": // the DATABASE_URL one-click (unwired since the invert; kept)
 		useDatabase(&c.Cards[i], r.FormValue("db"))
+	case "secret-set": // a 🔒 config var: value → host store, KEY → secret_env
+		key := strings.TrimSpace(r.FormValue("key"))
+		val := r.FormValue("value")
+		if key != "" && val != "" {
+			dep := c.Name
+			if dep == "" {
+				dep = id
+			}
+			member := c.Cards[i].Name
+			if len(c.Cards) == 1 {
+				member = dep // single-app deploys key the store by the deployment name
+			}
+			if err := plystate.SetSecret(s.paths, dep, member, key, val); err == nil {
+				c.Cards[i].SecretEnv = addStr(c.Cards[i].SecretEnv, key)
+			}
+		}
+	case "secret-rm":
+		key := strings.TrimSpace(r.FormValue("key"))
+		dep := c.Name
+		if dep == "" {
+			dep = id
+		}
+		member := c.Cards[i].Name
+		if len(c.Cards) == 1 {
+			member = dep
+		}
+		c.Cards[i].SecretEnv = withoutStrSlice(c.Cards[i].SecretEnv, key)
+		_ = plystate.RemoveSecret(s.paths, dep, member, key)
 	default: // edit
 		edited := parseCardForm(r)
 		edited.Kind, edited.Ref = c.Cards[i].Kind, c.Cards[i].Ref // source is immutable
 		edited.Name = uniqueNameExcept(edited.Name, c.Cards, i)
+		oldName := c.Cards[i].Name
+		edited.SecretEnv = c.Cards[i].SecretEnv // secret keys survive a plain edit
 		c.Cards[i] = edited
+		if len(c.Cards) > 1 && edited.Name != oldName {
+			// a renamed member's stored secrets are keyed by member name — move them
+			dep := c.Name
+			if dep == "" {
+				dep = id
+			}
+			if err := plystate.RenameMemberSecrets(s.paths, dep, oldName, edited.Name); err != nil {
+				log.Printf("rename secrets %s/%s→%s: %v", dep, oldName, edited.Name, err)
+			}
+		}
 	}
 	_ = cart.WriteDraft(s.depDir(), id, c)
 	s.render(w, "cart", "cart", s.builderData(id, c))
@@ -658,4 +701,25 @@ func uniqueNameExcept(name string, existing []cart.Card, skip int) string {
 			return cand
 		}
 	}
+}
+
+// addStr appends s to list if absent (dedup), preserving order.
+func addStr(list []string, s string) []string {
+	for _, x := range list {
+		if x == s {
+			return list
+		}
+	}
+	return append(list, s)
+}
+
+// withoutStrSlice returns list without any element equal to s.
+func withoutStrSlice(list []string, s string) []string {
+	out := make([]string, 0, len(list))
+	for _, x := range list {
+		if x != s {
+			out = append(out, x)
+		}
+	}
+	return out
 }

@@ -394,3 +394,39 @@ func TestMapOpRemapsExistingKey(t *testing.T) {
 		t.Fatalf("remap-to-value env = %v", c.Env)
 	}
 }
+
+func TestCartRendersSecretsSubsection(t *testing.T) {
+	tmpl := builderTemplate(t, "web/templates/cart.html")
+	data := pageData{DraftID: "rtrtrtr", Cards: cardViews([]cart.Card{
+		{Name: "api", Kind: cart.KindRepo, Ref: "https://github.com/you/api", SecretEnv: []string{"STRIPE_KEY"}},
+	}, nil)}
+	var b strings.Builder
+	if err := tmpl.ExecuteTemplate(&b, "cart", data); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	// the declared key is shown masked, with a remove op and an add form
+	for _, want := range []string{"STRIPE_KEY", "••••", `"op":"secret-rm"`, `value="secret-set"`, `type="password"`} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("cart secrets subsection missing %q in:\n%s", want, out)
+		}
+	}
+}
+
+func TestAppSecretsPartialMasksValues(t *testing.T) {
+	tmpl := builderTemplate(t, "web/templates/app_config.html")
+	data := pageData{AppName: "api", Secrets: []secretView{
+		{Key: "STRIPE_KEY", Backed: true},
+		{Key: "SENDGRID_KEY", Backed: false},
+	}}
+	var b strings.Builder
+	if err := tmpl.ExecuteTemplate(&b, "app-secrets", data); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	for _, want := range []string{"STRIPE_KEY", "SENDGRID_KEY", "••••", "no value yet", "/app/api/secret/set", `type="password"`} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("app-secrets partial missing %q in:\n%s", want, out)
+		}
+	}
+}

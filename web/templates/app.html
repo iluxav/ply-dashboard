@@ -58,5 +58,8 @@
   document.body.addEventListener('htmx:afterSwap', function(e){ if(e.target && e.target.id==='app-domains') start(e.target); });
 })();
 </script>
+
+<h2 class="text-accent/80 text-[10px] uppercase tracking-wider mt-10 mb-3">secrets</h2>
+<div id="app-secrets">{{template "app-secrets" .}}</div>
 {{end}}
 {{end}}

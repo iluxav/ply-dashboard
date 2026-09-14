@@ -145,6 +145,33 @@
         <div class="text-fade/30 mt-1.5">a value from a service writes <code>KEY={service.field}</code> — ply resolves it at deploy (a database's <code>url</code> carries its sealed password).</div>
       </div>
       {{end}}
+
+      {{/* SECRETS 🔒 — the value goes to the host secret store (0600, off the
+           spec and git); the card records only the KEY in secret_env. Injected
+           at runtime; never read back. */}}
+      <div class="px-3 pb-2.5 pl-10 border-t border-edge/40 pt-2 text-[11px]">
+        <div class="text-fade/50 mb-1.5">secrets <span class="text-accent/70">🔒</span> <span class="text-fade/30">· kept on the host, injected at runtime</span></div>
+        {{range $k := $card.SecretEnv}}
+        <div class="flex items-center gap-2 mb-1">
+          <code class="text-ink w-48 shrink-0 truncate">{{$k}}</code>
+          <span class="text-fade/40 font-mono tracking-widest shrink-0">••••••••</span>
+          <button type="button" title="remove this secret"
+                  hx-post="/deploy/draft/{{$.DraftID}}/card/{{$card.Index}}" hx-vals='{"op":"secret-rm","key":"{{$k}}"}'
+                  hx-target="#cart" hx-swap="outerHTML" class="text-fade/40 hover:text-red-400">×</button>
+        </div>
+        {{end}}
+        <form hx-post="/deploy/draft/{{$.DraftID}}/card/{{$card.Index}}" hx-target="#cart" hx-swap="outerHTML"
+              class="flex items-center gap-1 flex-wrap mt-0.5" autocomplete="off" hx-on::after-request="this.reset()">
+          <input type="hidden" name="op" value="secret-set">
+          <input name="key" placeholder="STRIPE_KEY" spellcheck="false" autocomplete="off"
+                 pattern="[A-Za-z_][A-Za-z0-9_]*" title="an environment variable name"
+                 class="bg-card border border-edge/60 rounded px-1.5 py-0.5 text-ink font-mono w-40 outline-none focus:border-accent/50">
+          <input name="value" type="password" placeholder="value (host-only)" autocomplete="new-password"
+                 class="bg-card border border-edge/60 rounded px-1.5 py-0.5 text-ink font-mono w-40 outline-none focus:border-accent/50">
+          <button class="text-accent/90 hover:text-accent border border-accent/40 hover:border-accent/70 rounded px-2 py-0.5">set 🔒</button>
+          <span class="htmx-indicator text-accent/70">◌</span>
+        </form>
+      </div>
     </div>
   {{end}}
   </div>
