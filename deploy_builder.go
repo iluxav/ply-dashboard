@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -91,10 +92,51 @@ type cardView struct {
 	Expects     []string          // env-var keys this app reads (from its .env.example)
 	WireKeys    []string          // need-first rows: Expects ∪ keys already set, in order
 	EnvMap      map[string]string // KEY→VALUE from the card's env (for the mapped/unmapped rows)
+	Wire        []wireRow         // one need-first row per WireKey, with its current source parsed out
 	EnvText     string            // env as KEY=VALUE lines (the raw escape hatch)
 	PublishText string            // publish, one per line
 	DomainText  string
 	VolumeText  string
+}
+
+// wireRow is one need-first row: the env KEY the app reads, plus how it's
+// satisfied right now — a reference to a peer's field ({service.field}), a
+// fixed literal value, or nothing yet. The picker renders PRE-SELECTED to this
+// so a mapping can be changed in place, not only after clearing it first.
+type wireRow struct {
+	Key     string
+	Mapped  bool   // a value is set (ref or literal)
+	IsRef   bool   // the value is a {service.field} reference
+	Service string // ref: the peer name (blank for a literal → picker shows "— a fixed value —")
+	Field   string // ref: the field name
+	Value   string // the raw value ({service.field} or the literal) — for display + prefill
+}
+
+// wireRef matches a `{service.field}` reference so a mapped row's picker can be
+// pre-selected. `field` is greedy (a member field never carries a dot, but a
+// dotted value would still land in Field rather than being lost).
+var wireRef = regexp.MustCompile(`^\{([^.]+)\.(.+)\}$`)
+
+// parseWireRow classifies a KEY's current value into a wireRow.
+func parseWireRow(key, val string) wireRow {
+	row := wireRow{Key: key, Value: val}
+	if val == "" {
+		return row // unmapped
+	}
+	row.Mapped = true
+	if m := wireRef.FindStringSubmatch(val); m != nil {
+		row.IsRef, row.Service, row.Field = true, m[1], m[2]
+	}
+	return row
+}
+
+// wireRows builds one row per need-first key, in order, from the card's env.
+func wireRows(keys []string, env map[string]string) []wireRow {
+	rows := make([]wireRow, len(keys))
+	for i, k := range keys {
+		rows[i] = parseWireRow(k, env[k])
+	}
+	return rows
 }
 
 // envMap parses a card's `KEY=VALUE` env lines into a map.
@@ -329,11 +371,14 @@ func toCardView(c cart.Card, i int, all []cart.Card, meta cart.DraftMeta) cardVi
 	for _, a := range c.After {
 		hints = append(hints, afterHint{Name: a, Prefix: injectPrefix(a)})
 	}
+	keys := wireKeys(meta[c.Ref], c.Env)
+	em := envMap(c.Env)
 	return cardView{
 		Index: i, C: c, Others: others, AfterInject: hints, DBs: dbs,
 		Expects:     meta[c.Ref],
-		WireKeys:    wireKeys(meta[c.Ref], c.Env),
-		EnvMap:      envMap(c.Env),
+		WireKeys:    keys,
+		EnvMap:      em,
+		Wire:        wireRows(keys, em),
 		EnvText:     strings.Join(c.Env, "\n"),
 		PublishText: strings.Join(c.Publish, "\n"),
 		DomainText:  strings.Join(c.Domain, "\n"),
@@ -418,10 +463,23 @@ func (s *server) deployEditBuilder(w http.ResponseWriter, r *http.Request) {
 	}
 	c.Name = name
 	// The draft id IS the deployment name, so promote writes <name>.toml in
-	// place. Expected-vars (.env.example) aren't re-fetched here — an edited
-	// card simply shows no "reads:" rows until re-detected; edit never blocks
-	// on the network.
+	// place.
 	_ = cart.WriteDraft(s.depDir(), name, c)
+	// Re-fetch each repo card's .env.example so the wire rows show the same
+	// "reads: …" hints (and surface declared-but-unmapped vars) as on create —
+	// on edit the draft meta is otherwise empty. Best-effort and tokenless: a
+	// private repo or a network miss just skips that card (no Expects); edit
+	// never blocks or fails on the network.
+	meta := cart.ReadMeta(s.depDir(), name)
+	for _, card := range c.Cards {
+		if card.Kind != cart.KindRepo || card.Ref == "" {
+			continue
+		}
+		if insp, err := github.Inspect(card.Ref, ""); err == nil && len(insp.EnvExample) > 0 {
+			meta[card.Ref] = insp.EnvExample
+		}
+	}
+	_ = cart.WriteMeta(s.depDir(), name, meta)
 	s.render(w, "deploy_new", "base.html", s.builderData(name, c))
 }
 

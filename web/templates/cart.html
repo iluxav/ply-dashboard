@@ -74,41 +74,47 @@
       {{/* NEED-FIRST WIRE — driven by what the app reads (.env.example) ∪ what's
            already set. Kept OUTSIDE the edit form so a select change doesn't
            re-submit the card; each row's op reads the autosaved draft. */}}
-      {{if or $card.WireKeys $card.Others}}
+      {{if or $card.Wire $card.Others}}
       <div class="px-3 pb-2.5 pl-10 border-t border-edge/40 pt-2 text-[11px]">
         <div class="text-fade/50 mb-1.5">
           wire — where does each value come from?{{if $card.Expects}} <span class="text-fade/30">· needs from .env.example</span>{{end}}
         </div>
-        {{if $card.WireKeys}}
+        {{if $card.Wire}}
         <div class="space-y-1">
-        {{range $key := $card.WireKeys}}
-          {{$val := index $card.EnvMap $key}}
+        {{range $row := $card.Wire}}
+          {{/* Every row — mapped or not — renders the picker, pre-selected to
+               its current source, so a mapping can be changed in place; a
+               mapped row also shows a faint confirmation + a × to clear it. */}}
           <div class="flex items-center gap-2 flex-wrap">
-            <code class="text-ink w-48 shrink-0 truncate">{{$key}}</code>
-            {{if $val}}
-              <span class="text-fade/60 shrink-0">= <code class="text-fade/80">{{$val}}</code></span>
-              <button type="button" title="clear this mapping"
-                      hx-post="/deploy/draft/{{$.DraftID}}/card/{{$card.Index}}" hx-vals='{"op":"unmap","key":"{{$key}}"}'
-                      hx-target="#cart" hx-swap="outerHTML" class="text-fade/40 hover:text-red-400">×</button>
+            <code class="text-ink w-48 shrink-0 truncate">{{$row.Key}}</code>
+            {{if $row.Mapped}}
+              <span class="text-fade/45 shrink-0" title="current value">= <code class="text-fade/70">{{$row.Value}}</code></span>
             {{else}}
               <span class="text-amber-500/70 shrink-0" title="no source yet">⚠</span>
-              <form class="js-picker flex items-center gap-1 flex-wrap"
-                    hx-post="/deploy/draft/{{$.DraftID}}/card/{{$card.Index}}" hx-target="#cart" hx-swap="outerHTML">
-                <input type="hidden" name="op" value="map">
-                <input type="hidden" name="key" value="{{$key}}">
-                <span class="text-fade/40">from</span>
-                <select name="service" class="bg-card border border-edge/60 rounded px-1 py-0.5 text-ink outline-none focus:border-accent/50">
-                  {{range $card.Others}}<option value="{{.Name}}" data-db="{{if .IsDB}}1{{end}}">{{.Name}}</option>{{end}}
-                  <option value="__value__">— a fixed value —</option>
-                </select>
-                <select name="field" class="js-wire-field bg-card border border-edge/60 rounded px-1 py-0.5 text-ink outline-none focus:border-accent/50">
-                  <option value="host">host</option><option value="port">port</option><option value="addr">addr</option><option value="base_url">base_url</option><option value="name">name</option><option value="version">version</option>
-                </select>
-                <input name="value" placeholder="a value" spellcheck="false"
-                       class="js-wire-value hidden bg-card border border-edge/60 rounded px-1 py-0.5 text-ink font-mono w-32 outline-none focus:border-accent/50">
-                <button class="text-accent/90 hover:text-accent border border-accent/40 hover:border-accent/70 rounded px-2 py-0.5">map</button>
-              </form>
             {{end}}
+            <form class="js-picker flex items-center gap-1 flex-wrap"
+                  hx-post="/deploy/draft/{{$.DraftID}}/card/{{$card.Index}}" hx-target="#cart" hx-swap="outerHTML">
+              <input type="hidden" name="op" value="map">
+              <input type="hidden" name="key" value="{{$row.Key}}">
+              <span class="text-fade/40">from</span>
+              <select name="service" class="bg-card border border-edge/60 rounded px-1 py-0.5 text-ink outline-none focus:border-accent/50">
+                {{range $card.Others}}<option value="{{.Name}}" data-db="{{if .IsDB}}1{{end}}"{{if and $row.IsRef (eq .Name $row.Service)}} selected{{end}}>{{.Name}}</option>{{end}}
+                <option value="__value__"{{if and $row.Mapped (not $row.IsRef)}} selected{{end}}>— a fixed value —</option>
+              </select>
+              {{/* data-cur carries the pre-selected field so fillFields keeps it
+                   even for a db param (url/password) not in the base facts. */}}
+              <select name="field" data-cur="{{$row.Field}}" class="js-wire-field bg-card border border-edge/60 rounded px-1 py-0.5 text-ink outline-none focus:border-accent/50">
+                <option value="host"{{if eq $row.Field "host"}} selected{{end}}>host</option><option value="port"{{if eq $row.Field "port"}} selected{{end}}>port</option><option value="addr"{{if eq $row.Field "addr"}} selected{{end}}>addr</option><option value="base_url"{{if eq $row.Field "base_url"}} selected{{end}}>base_url</option><option value="name"{{if eq $row.Field "name"}} selected{{end}}>name</option><option value="version"{{if eq $row.Field "version"}} selected{{end}}>version</option>
+              </select>
+              <input name="value" placeholder="a value" spellcheck="false" value="{{if and $row.Mapped (not $row.IsRef)}}{{$row.Value}}{{end}}"
+                     class="js-wire-value hidden bg-card border border-edge/60 rounded px-1 py-0.5 text-ink font-mono w-32 outline-none focus:border-accent/50">
+              <button class="text-accent/90 hover:text-accent border border-accent/40 hover:border-accent/70 rounded px-2 py-0.5">{{if $row.Mapped}}remap{{else}}map{{end}}</button>
+              {{if $row.Mapped}}
+              <button type="button" title="clear this mapping"
+                      hx-post="/deploy/draft/{{$.DraftID}}/card/{{$card.Index}}" hx-vals='{"op":"unmap","key":"{{$row.Key}}"}'
+                      hx-target="#cart" hx-swap="outerHTML" class="text-fade/40 hover:text-red-400">×</button>
+              {{end}}
+            </form>
           </div>
         {{end}}
         </div>

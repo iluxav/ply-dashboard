@@ -328,3 +328,69 @@ func TestDockerDatabaseOffersNoParams(t *testing.T) {
 		t.Fatal("a registry database should be flagged IsDB")
 	}
 }
+
+func TestParseWireRow(t *testing.T) {
+	// a {service.field} reference
+	r := parseWireRow("SERVER_HOST", "{qa-server.host}")
+	if !r.Mapped || !r.IsRef || r.Service != "qa-server" || r.Field != "host" {
+		t.Fatalf("ref row = %+v", r)
+	}
+	// a fixed literal value
+	r = parseWireRow("PORT", "3000")
+	if !r.Mapped || r.IsRef || r.Service != "" || r.Value != "3000" {
+		t.Fatalf("literal row = %+v", r)
+	}
+	// unmapped
+	r = parseWireRow("SECRET", "")
+	if r.Mapped || r.IsRef {
+		t.Fatalf("unmapped row = %+v", r)
+	}
+	// a db param field survives (dot-free field, greedy still fine)
+	r = parseWireRow("DATABASE_URL", "{postgres.url}")
+	if !r.IsRef || r.Field != "url" {
+		t.Fatalf("db param row = %+v", r)
+	}
+}
+
+func TestCartMappedRowPickerPreselected(t *testing.T) {
+	tmpl := builderTemplate(t, "web/templates/cart.html")
+	// qa-web's SERVER_HOST is mapped to qa-server.host; PORT is a fixed value.
+	data := pageData{DraftID: "d1", Cards: cardViews([]cart.Card{
+		{Name: "qa-server", Kind: cart.KindRepo, Ref: "https://github.com/you/qa-server"},
+		{Name: "web", Kind: cart.KindRepo, Ref: "https://github.com/you/qa-web",
+			Env: []string{"SERVER_HOST={qa-server.host}", "PORT=3000"}},
+	}, cart.DraftMeta{"https://github.com/you/qa-web": {"SERVER_HOST", "PORT"}})}
+	var b strings.Builder
+	if err := tmpl.ExecuteTemplate(&b, "cart", data); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	for _, want := range []string{
+		`value="qa-server" data-db="" selected`,       // the ref row: service pre-selected
+		`<option value="host" selected>host</option>`, // …and its field pre-selected
+		`data-cur="host"`,                             // field survives fillFields rebuild
+		"remap",                                       // a mapped row's button reads "remap"
+		`"op":"unmap","key":"SERVER_HOST"`,            // …with a × to clear it
+		`<option value="__value__" selected>`,         // the literal row: fixed-value pre-selected
+		`value="3000"`,                                // …with the literal prefilled
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("mapped-row picker missing %q in:\n%s", want, out)
+		}
+	}
+}
+
+func TestMapOpRemapsExistingKey(t *testing.T) {
+	// the rtrtrtr fix: re-mapping SERVER_HOST from postgres to qa-server
+	// REPLACES the line in place rather than adding a duplicate.
+	c := cart.Card{Name: "web", Env: []string{"SERVER_HOST={postgres.host}"}}
+	addEnvRef(&c, "qa-server", "host", "SERVER_HOST")
+	if len(c.Env) != 1 || c.Env[0] != "SERVER_HOST={qa-server.host}" {
+		t.Fatalf("remap env = %v, want [SERVER_HOST={qa-server.host}]", c.Env)
+	}
+	// re-mapping to a fixed value likewise replaces in place
+	c.Env = setEnvKey(c.Env, "SERVER_HOST", "db.internal")
+	if len(c.Env) != 1 || c.Env[0] != "SERVER_HOST=db.internal" {
+		t.Fatalf("remap-to-value env = %v", c.Env)
+	}
+}

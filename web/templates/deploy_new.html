@@ -113,7 +113,11 @@
     if(fld){
       fld.classList.toggle('hidden', isValue);
       if(!isValue){
-        var list=isdb?DBP.concat(FACTS):FACTS, cur=fld.value;
+        var list=isdb?DBP.concat(FACTS):FACTS;
+        // honor a server pre-selected field once (data-cur survives the rebuild
+        // even for a db param like `password` not in the base facts), else keep
+        // whatever's live so switching service doesn't wipe the choice.
+        var cur=fld.dataset.cur||fld.value; if(fld.dataset.cur) fld.removeAttribute('data-cur');
         fld.innerHTML=list.map(function(x){return '<option value="'+x+'">'+x+'</option>';}).join('');
         if(list.indexOf(cur)>=0) fld.value=cur;
       }
