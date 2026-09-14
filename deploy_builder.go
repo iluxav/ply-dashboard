@@ -43,6 +43,8 @@ func srcBadge(kind string) string {
 		return "git+"
 	case cart.KindImage:
 		return "image"
+	case cart.KindDocker:
+		return "docker"
 	default:
 		return "registry"
 	}
@@ -461,7 +463,9 @@ func (s *server) deployDetect(w http.ResponseWriter, r *http.Request) {
 	case "image":
 		d.Card = cart.Card{Kind: cart.KindImage, Ref: in, Name: cart.DeriveName(in)}
 	case "docker":
-		d.Note = "Docker images aren't a deployment source yet — `ply import` it and publish, then add it from the registry"
+		// no framework inspection — just the ref, imported on the host at deploy.
+		d.Card = cart.Card{Kind: cart.KindDocker, Ref: in, Name: cart.DeriveName(in)}
+		d.Note = "Docker image — larger than a native package (imported & cached on the host). If the registry has a native ply/" + d.Card.Name + ", prefer it."
 	}
 	s.render(w, "detected", "detected", pageData{DraftID: id, Detected: &d})
 }

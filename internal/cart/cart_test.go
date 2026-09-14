@@ -236,3 +236,52 @@ after = ["server"]
 		t.Fatalf("server card lost kind/after: %+v", got.Cards[1])
 	}
 }
+
+func TestDockerCardFlatOrder(t *testing.T) {
+	// a single docker card → a flat `docker =` order
+	c := Cart{Name: "pg", Cards: []Card{
+		{Name: "pg", Kind: KindDocker, Ref: "docker://postgres:17", Publish: []string{"internal:5432"}},
+	}}
+	out := c.ToTOML()
+	if !strings.Contains(out, `docker = "docker://postgres:17"`) {
+		t.Fatalf("flat docker order missing docker= line:\n%s", out)
+	}
+	back, err := FromTOML(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(back.Cards) != 1 || back.Cards[0].Kind != KindDocker || back.Cards[0].Ref != "docker://postgres:17" {
+		t.Fatalf("flat docker did not round-trip: %+v", back.Cards)
+	}
+}
+
+func TestDockerMemberRoundTrips(t *testing.T) {
+	c := Cart{Name: "stack", Cards: []Card{
+		{Name: "web", Kind: KindRepo, Ref: "https://github.com/you/web", Build: "npm install"},
+		{Name: "db", Kind: KindDocker, Ref: "docker://postgres:17", Publish: []string{"internal:5432"}, Env: []string{"POSTGRES_PASSWORD=x"}},
+	}}
+	out := c.ToTOML()
+	if !strings.Contains(out, `run = "docker://postgres:17"`) {
+		t.Fatalf("docker member missing run line:\n%s", out)
+	}
+	back, err := FromTOML(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(back.Cards) != 2 || back.Cards[1].Kind != KindDocker || back.Cards[1].Ref != "docker://postgres:17" {
+		t.Fatalf("docker member did not round-trip: %+v", back.Cards)
+	}
+}
+
+func TestDeriveNameDocker(t *testing.T) {
+	for ref, want := range map[string]string{
+		"docker://postgres:17":             "postgres",
+		"docker://ghcr.io/org/postgres:17": "postgres",
+		"docker://redis":                   "redis",
+		"docker://mongo@sha256:abc":        "mongo",
+	} {
+		if got := DeriveName(ref); got != want {
+			t.Errorf("DeriveName(%q) = %q, want %q", ref, got, want)
+		}
+	}
+}

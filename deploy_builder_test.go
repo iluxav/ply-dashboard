@@ -277,3 +277,26 @@ func TestPlyRepoWithPackageJSONPrefillsNpmInstall(t *testing.T) {
 		t.Fatalf("build = %q, want empty", c2.Build)
 	}
 }
+
+func TestCartDockerCardShowsWarning(t *testing.T) {
+	tmpl := builderTemplate(t, "web/templates/cart.html")
+	data := pageData{DraftID: "d1", Cards: cardViews([]cart.Card{
+		{Name: "db", Kind: cart.KindDocker, Ref: "docker://postgres:17", Publish: []string{"internal:5432"}},
+	}, nil)}
+	var b strings.Builder
+	if err := tmpl.ExecuteTemplate(&b, "cart", data); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	for _, want := range []string{"docker · docker://postgres:17", "Docker image — larger than a native package", "ply/&lt;name&gt;"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("docker card missing %q in:\n%s", want, out)
+		}
+	}
+}
+
+func TestClassifyDocker(t *testing.T) {
+	if classifySource("docker://postgres:17") != "docker" {
+		t.Fatal("docker:// should classify as docker")
+	}
+}

@@ -29,6 +29,11 @@
             <button type="button" title="remove"    hx-post="/deploy/draft/{{$.DraftID}}/card/{{.Index}}" hx-vals='{"op":"remove"}' hx-target="#cart" hx-swap="outerHTML" class="hover:text-red-400 px-1">✕</button>
           </span>
         </div>
+        {{if eq .C.Kind "docker"}}
+        <div class="pl-10 mt-1.5 text-fade/45 text-[11px] leading-snug">
+          Docker image — larger than a native package, imported &amp; cached on the host. If the registry has a native <code class="text-fade/60">ply/&lt;name&gt;</code>, prefer it.
+        </div>
+        {{end}}
         <div class="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs pl-10 mt-2">
           {{if eq .C.Kind "repo"}}
           <label class="flex flex-col gap-0.5 col-span-2"><span class="text-fade/50">build</span>

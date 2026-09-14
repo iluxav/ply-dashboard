@@ -3,10 +3,6 @@
 {{if eq .Kind "empty"}}
 {{else if eq .Kind "error"}}
   <div class="border border-red-900/60 rounded px-3 py-2 text-red-400 text-xs">{{.Note}}</div>
-{{else if eq .Kind "docker"}}
-  <div class="border border-edge rounded px-3 py-2 text-fade/60 text-xs flex items-center gap-2">
-    <span class="text-fade/50">{{srcicon "docker"}}</span><span>{{.Note}}</span>
-  </div>
 {{else if eq .Kind "registry"}}
   {{if .Matches}}
   <div class="border border-edge rounded bg-card/40 divide-y divide-edge/50 overflow-hidden">

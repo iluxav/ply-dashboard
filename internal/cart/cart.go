@@ -23,6 +23,7 @@ const (
 	KindRepo     = "repo"     // a git repo built on the host   (run = "git+<ref>")
 	KindRegistry = "registry" // a registry ref                 (run = "<name>@<ver>")
 	KindImage    = "image"    // an image file or URL           (run/image = "<ref>")
+	KindDocker   = "docker"   // an OCI image imported on host   (run = "docker://<ref>", or docker=)
 )
 
 // Card is one service in the cart.
@@ -157,6 +158,8 @@ func (c Cart) flat() string {
 		}
 	case KindImage:
 		fmt.Fprintf(&b, "image = %s\n", tq(card.Ref))
+	case KindDocker:
+		fmt.Fprintf(&b, "docker = %s\n", tq(card.Ref))
 	default: // registry: split name@version
 		name, ver, _ := strings.Cut(card.Ref, "@")
 		fmt.Fprintf(&b, "app = %s\n", tq(name))
@@ -223,6 +226,7 @@ type rawSpec struct {
 	Repo    string            `toml:"repo"`
 	App     string            `toml:"app"`
 	Image   string            `toml:"image"`
+	Docker  string            `toml:"docker"`
 	Build   string            `toml:"build"`
 	Runtime string            `toml:"runtime"`
 	Version string            `toml:"version"`
@@ -234,6 +238,8 @@ type rawSpec struct {
 
 func kindOfRun(run string) (kind, ref string) {
 	switch {
+	case strings.HasPrefix(run, "docker://"):
+		return KindDocker, run
 	case strings.HasPrefix(run, "git+"):
 		return KindRepo, strings.TrimPrefix(run, "git+")
 	case strings.HasSuffix(run, ".img"), strings.HasPrefix(run, "http"):
@@ -276,6 +282,8 @@ func FromTOML(spec string) (Cart, error) {
 		card.Kind, card.Ref, card.Build, card.Runtime = KindRepo, raw.Repo, raw.Build, raw.Runtime
 	case raw.Image != "":
 		card.Kind, card.Ref = KindImage, raw.Image
+	case raw.Docker != "":
+		card.Kind, card.Ref = KindDocker, raw.Docker
 	case raw.App != "":
 		card.Kind = KindRegistry
 		card.Ref = raw.App
@@ -308,6 +316,20 @@ func DeriveName(ref string) string { return deriveName(ref) }
 // deriveName guesses a member name from a source ref (repo/image basename, or
 // a registry name without its version).
 func deriveName(ref string) string {
+	if r, ok := strings.CutPrefix(ref, "docker://"); ok {
+		// docker://ghcr.io/org/postgres:17 → postgres: drop a digest, take the
+		// last path segment, then its tag (the tag's `:` would otherwise win).
+		if i := strings.Index(r, "@"); i >= 0 {
+			r = r[:i]
+		}
+		if i := strings.LastIndex(r, "/"); i >= 0 {
+			r = r[i+1:]
+		}
+		if i := strings.Index(r, ":"); i >= 0 {
+			r = r[:i]
+		}
+		return SafeName(r)
+	}
 	ref = strings.TrimSuffix(ref, ".git")
 	if name, _, ok := strings.Cut(ref, "@"); ok && !strings.Contains(ref, "/") {
 		return name // registry name@ver
