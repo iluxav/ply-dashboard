@@ -44,6 +44,34 @@ func DeploymentOf(p Paths, app string) (string, bool) {
 func AddDomain(p Paths, app, domain string) error    { return editDomain(p, app, domain, true) }
 func RemoveDomain(p Paths, app, domain string) error { return editDomain(p, app, domain, false) }
 
+// AttachedDomains lists the domains the DEPLOYMENT declares for an app — the
+// source of truth for "attached". The running instance only learns a new
+// domain after reconcile restarts it, so reading the deployment lets a
+// just-attached domain show immediately.
+func AttachedDomains(p Paths, app string) []string {
+	dep, ok := DeploymentOf(p, app)
+	if !ok {
+		return nil
+	}
+	raw, err := os.ReadFile(filepath.Join(p.Deployments, dep+".toml"))
+	if err != nil {
+		return nil
+	}
+	c, err := cart.FromTOML(string(raw))
+	if err != nil {
+		return nil
+	}
+	if len(c.Cards) == 1 {
+		return c.Cards[0].Domain
+	}
+	for _, card := range c.Cards {
+		if card.Name == app {
+			return card.Domain
+		}
+	}
+	return nil
+}
+
 func editDomain(p Paths, app, domain string, add bool) error {
 	domain = strings.ToLower(strings.TrimSpace(domain))
 	if domain == "" {

@@ -14,7 +14,6 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -302,7 +301,7 @@ func (s *server) parseTemplates() {
 	}
 	s.pages = map[string]*template.Template{
 		"index":      page("web/templates/index.html", "web/templates/apps_table.html", "web/templates/events.html"),
-		"app":        page("web/templates/app.html", "web/templates/instances.html", "web/templates/logs.html", "web/templates/events.html"),
+		"app":        page("web/templates/app.html", "web/templates/instances.html", "web/templates/logs.html", "web/templates/events.html", "web/templates/app_domains.html"),
 		"deploy":     page("web/templates/deploy.html", "web/templates/deployments.html"),
 		"deploy_new": page("web/templates/deploy_new.html", "web/templates/cart.html", "web/templates/detected.html", "web/templates/recipe.html"),
 		"notify":     page("web/templates/notify.html"),
@@ -317,6 +316,7 @@ func (s *server) parseTemplates() {
 		"detected":    template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/detected.html")),
 		"recipe":      template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/recipe.html")),
 		"events":      template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/events.html")),
+		"app-domains": template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/app_domains.html")),
 		"logpane":     template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/logpane.html")),
 		"termpane":    template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/termpane.html")),
 		"envpane":     template.Must(template.New("p").Funcs(funcs).ParseFS(webFS, "web/templates/envpane.html")),
@@ -333,6 +333,7 @@ type pageData struct {
 	Apps       []plystate.App
 	AppName    string
 	App        plystate.App
+	Domains    []string // the deployment's attached domains (source of truth, not live state)
 	Instances  []plystate.Instance
 	Commands   []command
 	Slot       uint32
@@ -493,6 +494,7 @@ func (s *server) appPage(w http.ResponseWriter, r *http.Request) {
 	data.LogLines = s.logLines(app)
 	data.Events = plystate.Events(s.paths, name, 15)
 	data.DeployAvailable = plystate.DeploymentsAvailable(s.paths)
+	data.Domains = plystate.AttachedDomains(s.paths, name)
 	data.Error = r.URL.Query().Get("err")
 	s.render(w, "app", "base.html", data)
 }
@@ -509,11 +511,18 @@ func (s *server) appDomainRemove(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) domainEdit(w http.ResponseWriter, r *http.Request, edit func(plystate.Paths, string, string) error) {
 	name := r.PathValue("name")
-	back := "/app/" + url.PathEscape(name)
+	errStr := ""
 	if err := edit(s.paths, name, r.FormValue("domain")); err != nil {
-		back += "?err=" + url.QueryEscape(err.Error())
+		errStr = err.Error()
 	}
-	http.Redirect(w, r, back, http.StatusSeeOther)
+	// Re-render the domains partial in place (htmx swap) — the list reads the
+	// DEPLOYMENT, so a just-attached domain shows at once (it appears as
+	// "provisioning…" until the browser probe confirms HTTPS is live).
+	s.render(w, "app-domains", "app-domains", pageData{
+		AppName: name,
+		Domains: plystate.AttachedDomains(s.paths, name),
+		Error:   errStr,
+	})
 }
 
 func (s *server) appPartial(w http.ResponseWriter, r *http.Request) {

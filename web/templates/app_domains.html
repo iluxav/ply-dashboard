@@ -1,0 +1,29 @@
+{{define "app-domains"}}
+{{with .Error}}<div class="text-red-400 text-xs mb-2 border border-red-900/60 rounded px-3 py-2">{{.}}</div>{{end}}
+<div class="space-y-2 max-w-2xl">
+  {{range .Domains}}
+  <div class="flex items-center gap-3 text-xs border border-edge rounded px-3 py-2">
+    <a href="https://{{.}}" class="text-ink hover:text-accent font-mono">{{.}}</a>
+    <span class="js-domain-status text-fade/40" data-domain="{{.}}">checking…</span>
+    <button title="detach" class="ml-auto text-fade/50 hover:text-red-400"
+            hx-post="/app/{{$.AppName}}/domain/remove" hx-vals='{"domain":"{{.}}"}'
+            hx-target="#app-domains" hx-swap="innerHTML"
+            hx-confirm="Detach {{.}}? It stops routing on the next reconcile beat.">×</button>
+  </div>
+  {{else}}
+  <div class="text-fade/50 text-xs">no domain attached yet</div>
+  {{end}}
+  <form hx-post="/app/{{.AppName}}/domain/add" hx-target="#app-domains" hx-swap="innerHTML"
+        class="flex items-center gap-2 text-xs">
+    <input name="domain" placeholder="app.example.com" spellcheck="false" autocomplete="off" required
+           class="bg-card border border-edge rounded px-2 py-1.5 text-ink font-mono w-64 focus:border-accent/60 outline-none">
+    <button class="bg-accent/90 hover:bg-accent text-ground font-bold rounded px-3 py-1.5">attach domain</button>
+    <span class="htmx-indicator text-accent/80">◌ attaching…</span>
+  </form>
+</div>
+<div class="text-fade/35 text-xs mt-2 max-w-2xl">
+  point an <span class="text-fade/60">A/AAAA</span> record for the domain at this host's public IP; HTTPS is
+  issued automatically once it resolves (Caddy · Let's Encrypt). The service must be published for the edge to
+  route to it.
+</div>
+{{end}}
