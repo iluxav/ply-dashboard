@@ -1011,6 +1011,11 @@ func (s *server) deployDelete(w http.ResponseWriter, r *http.Request) {
 		if err := plystate.RequestReap(s.paths, s.deploymentApps(name)...); err != nil {
 			log.Printf("reap request for %s: %v", name, err)
 		}
+		// secrets are config data too: with_data is the explicit opt-in to
+		// wipe this deployment's host secret store. A plain delete keeps them.
+		if err := plystate.RemoveDeploymentSecrets(s.paths, name); err != nil {
+			log.Printf("remove secrets for %s: %v", name, err)
+		}
 	}
 	if err := plystate.DeleteDeployment(s.paths, name); err != nil {
 		log.Printf("delete deployment: %v", err)

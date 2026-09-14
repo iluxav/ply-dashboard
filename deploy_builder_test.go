@@ -2,11 +2,14 @@ package main
 
 import (
 	"html/template"
+	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
 	"github.com/iluxav/ply-dashboard/internal/cart"
 	"github.com/iluxav/ply-dashboard/internal/github"
+	"github.com/iluxav/ply-dashboard/internal/plystate"
 )
 
 func builderTemplate(t *testing.T, files ...string) *template.Template {
@@ -428,5 +431,41 @@ func TestAppSecretsPartialMasksValues(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("app-secrets partial missing %q in:\n%s", want, out)
 		}
+	}
+}
+
+func TestCardRenameMigratesSecrets(t *testing.T) {
+	dir := t.TempDir()
+	p := plystate.Paths{Deployments: dir}
+	c := cart.Cart{Name: "mystack", Cards: []cart.Card{
+		{Name: "api", Kind: cart.KindRepo, Ref: "https://github.com/you/api", SecretEnv: []string{"STRIPE_KEY"}},
+		{Name: "db", Kind: cart.KindRegistry, Ref: "postgres@17"},
+	}}
+	if err := cart.WriteDraft(dir, "mystack", c); err != nil {
+		t.Fatal(err)
+	}
+	if err := plystate.SetSecret(p, "mystack", "api", "STRIPE_KEY", "sk_live"); err != nil {
+		t.Fatal(err)
+	}
+	s := &server{paths: p, fresh: newFreshness(p), pages: map[string]*template.Template{}}
+	s.parseTemplates()
+
+	// edit card 0: rename api → api2 (source is immutable; only the name changes)
+	form := "op=edit&name=api2&build=" + url.QueryEscape("npm install")
+	req := httptest.NewRequest("POST", "/deploy/draft/mystack/card/0", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetPathValue("id", "mystack")
+	req.SetPathValue("i", "0")
+	s.deployCardOp(httptest.NewRecorder(), req)
+
+	if plystate.HasSecret(p, "mystack", "api", "STRIPE_KEY") {
+		t.Fatal("old member's secret should have moved")
+	}
+	if !plystate.HasSecret(p, "mystack", "api2", "STRIPE_KEY") {
+		t.Fatal("secret should now be keyed by the new member name")
+	}
+	back, _ := cart.ReadDraft(dir, "mystack")
+	if back.Cards[0].Name != "api2" || len(back.Cards[0].SecretEnv) != 1 {
+		t.Fatalf("draft not updated: %#v", back.Cards[0])
 	}
 }

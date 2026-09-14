@@ -2,6 +2,9 @@ package main
 
 import (
 	"html/template"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -141,5 +144,32 @@ func TestDeploymentsDeleteWithData(t *testing.T) {
 	}
 	if strings.Count(out, `action="/deploy/xcf/delete"`) != 2 {
 		t.Fatal("expected both delete and delete+data to post the same route")
+	}
+}
+
+func TestDeployDeleteWithDataSweepsSecrets(t *testing.T) {
+	dir := t.TempDir()
+	p := plystate.Paths{Deployments: dir}
+	if err := os.WriteFile(filepath.Join(dir, "gone.toml"), []byte("app = \"gone\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := plystate.SetSecret(p, "gone", "gone", "STRIPE_KEY", "sk"); err != nil {
+		t.Fatal(err)
+	}
+	if err := plystate.SetSecret(p, "keep", "keep", "K", "v"); err != nil {
+		t.Fatal(err)
+	}
+	s := &server{paths: p, fresh: newFreshness(p)}
+
+	req := httptest.NewRequest("POST", "/deploy/gone/delete", strings.NewReader("with_data=1"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetPathValue("name", "gone")
+	s.deployDelete(httptest.NewRecorder(), req)
+
+	if plystate.HasSecret(p, "gone", "gone", "STRIPE_KEY") {
+		t.Fatal("delete + data should have swept gone's secret store")
+	}
+	if !plystate.HasSecret(p, "keep", "keep", "K") {
+		t.Fatal("another deployment's secrets must be untouched")
 	}
 }
