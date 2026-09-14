@@ -11,9 +11,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -25,6 +28,15 @@ const (
 	KindImage    = "image"    // an image file or URL           (run/image = "<ref>")
 	KindDocker   = "docker"   // an OCI image imported on host   (run = "docker://<ref>", or docker=)
 )
+
+// KV is one un-modeled deployment key preserved verbatim across a round-trip
+// (its value already rendered as a TOML literal). This is what keeps
+// grant_links / env_file / scale / a member's egress / params — anything the
+// cart model doesn't carry — from being silently dropped on edit or save.
+type KV struct {
+	Key      string
+	Rendered string
+}
 
 // Card is one service in the cart.
 type Card struct {
@@ -38,12 +50,16 @@ type Card struct {
 	Env     []string // "KEY=VALUE"
 	After   []string // member names this one starts after
 	Volume  []string
+	Extra   []KV // per-member keys the model doesn't carry (scale, egress, …)
 }
 
 // Cart is the whole deployment being assembled.
 type Cart struct {
-	Name  string
-	Cards []Card
+	Name         string
+	Version      string // [package] version (default 0.1.0); preserved
+	Cards        []Card
+	Extra        []KV // top-level/order keys not modeled (grant_links, env_file, …)
+	PackageExtra []KV // [package] keys beyond name/version (rare)
 }
 
 var nameSafe = regexp.MustCompile(`[^a-z0-9-]+`)
@@ -81,6 +97,115 @@ func nonEmpty(vs []string) []string {
 		}
 	}
 	return out
+}
+
+// renderTOMLValue turns a value decoded into a generic map back into a TOML
+// value literal, so a preserved un-modeled key re-emits equivalently. A table
+// becomes an INLINE table (`{ k = v }`) — that keeps a member's
+// `egress = { mode = "enforce" }` a single line inside its `[[service]]`.
+func renderTOMLValue(v any) string {
+	switch x := v.(type) {
+	case nil:
+		return `""`
+	case string:
+		return tq(x)
+	case bool:
+		if x {
+			return "true"
+		}
+		return "false"
+	case int64:
+		return strconv.FormatInt(x, 10)
+	case int:
+		return strconv.Itoa(x)
+	case float64:
+		return strconv.FormatFloat(x, 'g', -1, 64)
+	case time.Time:
+		return x.Format(time.RFC3339)
+	case map[string]any:
+		keys := make([]string, 0, len(x))
+		for k := range x {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		if len(keys) == 0 {
+			return "{}"
+		}
+		parts := make([]string, 0, len(keys))
+		for _, k := range keys {
+			parts = append(parts, k+" = "+renderTOMLValue(x[k]))
+		}
+		return "{ " + strings.Join(parts, ", ") + " }"
+	}
+	// arrays (of primitives or of tables) via reflect
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Slice, reflect.Array:
+		parts := make([]string, 0, rv.Len())
+		for i := 0; i < rv.Len(); i++ {
+			parts = append(parts, renderTOMLValue(rv.Index(i).Interface()))
+		}
+		return "[" + strings.Join(parts, ", ") + "]"
+	}
+	return tq(fmt.Sprintf("%v", v)) // last resort — never lose the value
+}
+
+// extras renders the keys of a decoded table that the model does NOT carry,
+// sorted for determinism. `modeled` is the set of keys already emitted.
+func extras(m map[string]any, modeled map[string]bool) []KV {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		if !modeled[k] {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	out := make([]KV, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, KV{Key: k, Rendered: renderTOMLValue(m[k])})
+	}
+	return out
+}
+
+// serviceMaps normalizes the generic `service` value (an array of tables) into
+// []map[string]any regardless of how the toml decoder typed it.
+func serviceMaps(v any) []map[string]any {
+	switch s := v.(type) {
+	case []map[string]any:
+		return s
+	case []any:
+		out := make([]map[string]any, 0, len(s))
+		for _, e := range s {
+			if m, ok := e.(map[string]any); ok {
+				out = append(out, m)
+			}
+		}
+		return out
+	}
+	return nil
+}
+
+func writeExtras(b *strings.Builder, kvs []KV) {
+	for _, kv := range kvs {
+		fmt.Fprintf(b, "%s = %s\n", kv.Key, kv.Rendered)
+	}
+}
+
+// the keys the model already emits — everything else is preserved as an extra.
+var (
+	memberModeled = set("run", "name", "build", "runtime", "publish", "domain", "env", "after", "volume")
+	flatModeled   = set("repo", "app", "image", "docker", "build", "runtime", "version",
+		"publish", "domain", "volume", "env", "package", "service")
+	packageModeled = set("name", "version")
+	compTopModeled = set("package", "service")
+)
+
+func set(keys ...string) map[string]bool {
+	m := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		m[k] = true
+	}
+	return m
 }
 
 // runValue is the `run =` a composition member carries for this card.
@@ -122,6 +247,7 @@ func (c Card) member() string {
 	if v := nonEmpty(c.Env); len(v) > 0 {
 		fmt.Fprintf(&b, "env = %s\n", tarr(v)) // member env is the array form
 	}
+	writeExtras(&b, c.Extra) // scale / egress / params / … stay in this block
 	return b.String()
 }
 
@@ -132,10 +258,16 @@ func (c Cart) composition() string {
 	if name == "" {
 		name = "draft"
 	}
+	ver := c.Version
+	if ver == "" {
+		ver = "0.1.0"
+	}
 	var b strings.Builder
+	writeExtras(&b, c.Extra) // top-level keys must precede any [table] section
 	b.WriteString("[package]\n")
 	fmt.Fprintf(&b, "name = %s\n", tq(name))
-	b.WriteString("version = \"0.1.0\"\n")
+	fmt.Fprintf(&b, "version = %s\n", tq(ver))
+	writeExtras(&b, c.PackageExtra)
 	for _, card := range c.Cards {
 		b.WriteString(card.member())
 	}
@@ -176,6 +308,9 @@ func (c Cart) flat() string {
 	if v := nonEmpty(card.Volume); len(v) > 0 {
 		fmt.Fprintf(&b, "volume = %s\n", tarr(v))
 	}
+	// preserved top-level keys (grant_links, env_file, scale, …) MUST come
+	// before the [env] table, or TOML folds them into it.
+	writeExtras(&b, c.Extra)
 	if env := nonEmpty(card.Env); len(env) > 0 {
 		b.WriteString("\n[env]\n")
 		for _, kv := range env {
@@ -219,7 +354,8 @@ type rawMember struct {
 
 type rawSpec struct {
 	Package struct {
-		Name string `toml:"name"`
+		Name    string `toml:"name"`
+		Version string `toml:"version"`
 	} `toml:"package"`
 	Service []rawMember `toml:"service"`
 	// flat single-source order
@@ -257,21 +393,35 @@ func FromTOML(spec string) (Cart, error) {
 	if _, err := toml.Decode(spec, &raw); err != nil {
 		return Cart{}, err
 	}
+	// A second decode into a generic map lets us read the VALUES of any keys
+	// the model doesn't carry, so a round-trip preserves them (per-member
+	// extras keep their index here — Undecoded() collapses array-of-tables).
+	var generic map[string]any
+	_, _ = toml.Decode(spec, &generic)
 	// composition
 	if len(raw.Service) > 0 {
-		c := Cart{Name: raw.Package.Name}
-		for _, m := range raw.Service {
+		c := Cart{Name: raw.Package.Name, Version: raw.Package.Version}
+		c.Extra = extras(generic, compTopModeled) // top-level keys (rare here)
+		if pkg, ok := generic["package"].(map[string]any); ok {
+			c.PackageExtra = extras(pkg, packageModeled)
+		}
+		svc := serviceMaps(generic["service"])
+		for i, m := range raw.Service {
 			kind, ref := kindOfRun(m.Run)
 			name := m.Name
 			if name == "" {
 				name = deriveName(ref)
 			}
-			c.Cards = append(c.Cards, Card{
+			card := Card{
 				Name: name, Kind: kind, Ref: ref,
 				Build: m.Build, Runtime: m.Runtime,
 				Publish: m.Publish, Domain: m.Domain, Env: m.Env,
 				After: m.After, Volume: m.Volume,
-			})
+			}
+			if i < len(svc) {
+				card.Extra = extras(svc[i], memberModeled)
+			}
+			c.Cards = append(c.Cards, card)
 		}
 		return c, nil
 	}
@@ -297,7 +447,14 @@ func FromTOML(spec string) (Cart, error) {
 		card.Env = append(card.Env, k+"="+raw.Env[k])
 	}
 	card.Name = deriveName(card.Ref)
-	return Cart{Name: raw.Package.Name, Cards: []Card{card}}, nil
+	return Cart{
+		Name:    raw.Package.Name,
+		Version: raw.Package.Version,
+		Cards:   []Card{card},
+		// grant_links / env_file / token_file / scale / … — preserved so the
+		// edit builder and the domain editor never silently drop them.
+		Extra: extras(generic, flatModeled),
+	}, nil
 }
 
 func sortedKeys(m map[string]string) []string {

@@ -4,9 +4,138 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/BurntSushi/toml"
 )
+
+// assertTOMLEqual decodes two TOML docs into generic maps and asserts they're
+// value-equal — the round-trip needn't be byte-identical, only lossless.
+func assertTOMLEqual(t *testing.T, want, got string) {
+	t.Helper()
+	var mw, mg map[string]any
+	if _, err := toml.Decode(want, &mw); err != nil {
+		t.Fatalf("decode want: %v", err)
+	}
+	if _, err := toml.Decode(got, &mg); err != nil {
+		t.Fatalf("decode got: %v\n%s", err, got)
+	}
+	if !reflect.DeepEqual(mw, mg) {
+		t.Fatalf("round-trip lost/changed a field:\nwant=%#v\ngot =%#v\n--- got TOML ---\n%s", mw, mg, got)
+	}
+}
+
+func TestFlatOrderPreservesUnmodeledFields(t *testing.T) {
+	// the dashboard's-own-deployment shape — grant_links MUST survive.
+	spec := `app = "dashboard"
+version = "0.1.43"
+grant_links = true
+env_file = ".env/dash.env"
+token_file = "t.tok"
+scale = 3
+publish = ["internal:7070"]
+domain = ["qa.plybox.sh"]
+
+[env]
+NODE_ENV = "production"
+`
+	c, err := FromTOML(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := c.ToTOML()
+	assertTOMLEqual(t, spec, out)
+	if !strings.Contains(out, "grant_links = true") {
+		t.Fatalf("grant_links dropped:\n%s", out)
+	}
+}
+
+func TestCompositionMemberPreservesExtras(t *testing.T) {
+	spec := `[package]
+name = "shop"
+version = "0.1.0"
+
+[[service]]
+run = "postgres@17"
+name = "db"
+publish = ["internal:5432"]
+scale = 2
+egress = { mode = "enforce" }
+params = { region = "eu" }
+
+[[service]]
+run = "git+https://github.com/you/web"
+name = "web"
+build = "npm install"
+after = ["db"]
+`
+	c, err := FromTOML(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var db, web Card
+	for _, cd := range c.Cards {
+		switch cd.Name {
+		case "db":
+			db = cd
+		case "web":
+			web = cd
+		}
+	}
+	if len(web.Extra) != 0 {
+		t.Fatalf("web should carry no extras, got %v", web.Extra)
+	}
+	if len(db.Extra) != 3 { // scale, egress, params — on db only
+		t.Fatalf("db should carry scale/egress/params, got %v", db.Extra)
+	}
+	assertTOMLEqual(t, spec, c.ToTOML())
+}
+
+func TestCompositionPreservesPackageVersion(t *testing.T) {
+	// two services so it stays a composition (a 1-card cart collapses to flat).
+	spec := `[package]
+name = "shop"
+version = "2.3.4"
+
+[[service]]
+run = "redis@8"
+name = "cache"
+
+[[service]]
+run = "postgres@17"
+name = "db"
+`
+	c, err := FromTOML(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Version != "2.3.4" {
+		t.Fatalf("version = %q, want 2.3.4", c.Version)
+	}
+	assertTOMLEqual(t, spec, c.ToTOML())
+}
+
+func TestRenderTOMLValue(t *testing.T) {
+	cases := []struct {
+		in   any
+		want string
+	}{
+		{"a b", `"a b"`},
+		{true, "true"},
+		{false, "false"},
+		{int64(7), "7"},
+		{3.5, "3.5"},
+		{[]any{"x", int64(2)}, `["x", 2]`},
+		{map[string]any{"mode": "enforce", "n": int64(1)}, `{ mode = "enforce", n = 1 }`},
+	}
+	for _, c := range cases {
+		if got := renderTOMLValue(c.in); got != c.want {
+			t.Errorf("renderTOMLValue(%#v) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
 
 func TestOneRepoCardIsAFlatOrder(t *testing.T) {
 	c := Cart{Name: "site", Cards: []Card{{

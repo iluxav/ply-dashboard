@@ -101,16 +101,6 @@ func TestBadDomainRejected(t *testing.T) {
 	}
 }
 
-func TestRefusesUnmodeledFields(t *testing.T) {
-	p := Paths{Deployments: t.TempDir()}
-	// grant_links is not carried by the cart model → refuse rather than drop it
-	writeDep(t, p, "dash", "app = \"dashboard\"\ngrant_links = true\npublish = [\"internal:7070\"]\n")
-	err := AddDomain(p, "dash", "dash.example.com")
-	if err == nil || !strings.Contains(err.Error(), "grant_links") {
-		t.Fatalf("expected refusal naming grant_links, got %v", err)
-	}
-}
-
 func TestDeploymentOf(t *testing.T) {
 	p := Paths{Deployments: t.TempDir()}
 	os.MkdirAll(filepath.Join(p.Deployments, ".status"), 0o755)
@@ -125,5 +115,29 @@ func TestDeploymentOf(t *testing.T) {
 	}
 	if _, ok := DeploymentOf(p, "ghost"); ok {
 		t.Fatal("DeploymentOf(ghost) should be false")
+	}
+}
+
+func TestAddDomainPreservesGrantLinks(t *testing.T) {
+	p := Paths{Deployments: t.TempDir()}
+	// the dashboard's-own shape: previously REFUSED; now must succeed + keep it.
+	writeDep(t, p, "dashboard",
+		"app = \"dashboard\"\ngrant_links = true\nenv_file = \".env/x.env\"\npublish = [\"internal:7070\"]\n")
+	if err := AddDomain(p, "dashboard", "dash.example.com"); err != nil {
+		t.Fatalf("AddDomain refused/failed: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(p.Deployments, "dashboard.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(raw)
+	if !strings.Contains(got, "dash.example.com") {
+		t.Fatalf("domain not added:\n%s", got)
+	}
+	if !strings.Contains(got, "grant_links = true") {
+		t.Fatalf("grant_links dropped by the domain edit:\n%s", got)
+	}
+	if !strings.Contains(got, "env_file") {
+		t.Fatalf("env_file dropped by the domain edit:\n%s", got)
 	}
 }

@@ -7,7 +7,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/BurntSushi/toml"
 	"github.com/iluxav/ply-dashboard/internal/cart"
 )
 
@@ -61,12 +60,9 @@ func editDomain(p Paths, app, domain string, add bool) error {
 	if err != nil {
 		return err
 	}
-	// The quick editor round-trips through the cart model, which doesn't carry
-	// every field. Refuse rather than silently drop grant_links / token_file /
-	// env_file / scale / … — point the operator at the raw spec editor.
-	if lossy := unmodeledField(string(raw)); lossy != "" {
-		return fmt.Errorf("this deployment uses %q, which the quick domain editor can't preserve — edit its spec on the deploy page instead", lossy)
-	}
+	// The cart round-trip preserves un-modeled fields (grant_links, env_file,
+	// scale, a member's egress/params, …), so editing a domain never drops
+	// anything — no need to refuse.
 	c, err := cart.FromTOML(string(raw))
 	if err != nil {
 		return fmt.Errorf("parsing deployment %q: %w", dep, err)
@@ -93,59 +89,6 @@ func editDomain(p Paths, app, domain string, add bool) error {
 		c.Cards[idx].Domain = withoutStr(c.Cards[idx].Domain, domain)
 	}
 	return writeSpec(p, dep, c.ToTOML())
-}
-
-// unmodeledField returns the first key a cart round-trip would drop, or "".
-// A whitelist of what the cart models keeps this honest as the model grows.
-func unmodeledField(spec string) string {
-	var m map[string]any
-	if _, err := toml.Decode(spec, &m); err != nil {
-		return "" // let FromTOML surface the parse error instead
-	}
-	topSafe := set("package", "service", "app", "from", "image", "docker",
-		"repo", "build", "runtime", "version", "publish", "domain", "env", "volume")
-	memberSafe := set("run", "name", "build", "runtime", "publish", "domain",
-		"env", "e", "after", "volume")
-	for k := range m {
-		if !topSafe[k] {
-			return k
-		}
-	}
-	// members live under [[service]] (or the legacy [[app]] array)
-	for _, key := range []string{"service", "app"} {
-		for _, sm := range asTables(m[key]) {
-			for k := range sm {
-				if !memberSafe[k] {
-					return key + "." + k
-				}
-			}
-		}
-	}
-	return ""
-}
-
-func asTables(v any) []map[string]any {
-	switch t := v.(type) {
-	case []map[string]any:
-		return t
-	case []any:
-		var out []map[string]any
-		for _, it := range t {
-			if sm, ok := it.(map[string]any); ok {
-				out = append(out, sm)
-			}
-		}
-		return out
-	}
-	return nil
-}
-
-func set(keys ...string) map[string]bool {
-	m := make(map[string]bool, len(keys))
-	for _, k := range keys {
-		m[k] = true
-	}
-	return m
 }
 
 func containsStr(list []string, s string) bool {
