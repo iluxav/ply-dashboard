@@ -300,3 +300,31 @@ func TestClassifyDocker(t *testing.T) {
 		t.Fatal("docker:// should classify as docker")
 	}
 }
+
+func TestDockerDatabaseOffersNoParams(t *testing.T) {
+	// a docker "postgres" exposes only built-in facts — the picker must NOT
+	// flag it IsDB (which would offer url/password that don't resolve).
+	v := cardViews([]cart.Card{
+		{Name: "postgres", Kind: cart.KindDocker, Ref: "docker://postgres:17"},
+		{Name: "app", Kind: cart.KindRepo, Ref: "https://github.com/you/app"},
+	}, nil)
+	for _, o := range v[1].Others {
+		if o.Name == "postgres" && o.IsDB {
+			t.Fatal("a docker database must not be flagged IsDB (no params to offer)")
+		}
+	}
+	// a REGISTRY postgres (native package) does declare them → IsDB
+	v2 := cardViews([]cart.Card{
+		{Name: "pg", Kind: cart.KindRegistry, Ref: "postgres@17"},
+		{Name: "app", Kind: cart.KindRepo, Ref: "https://github.com/you/app"},
+	}, nil)
+	ok := false
+	for _, o := range v2[1].Others {
+		if o.Name == "pg" && o.IsDB {
+			ok = true
+		}
+	}
+	if !ok {
+		t.Fatal("a registry database should be flagged IsDB")
+	}
+}

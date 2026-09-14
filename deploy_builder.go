@@ -314,7 +314,12 @@ func toCardView(c cart.Card, i int, all []cart.Card, meta cart.DraftMeta) cardVi
 		if j == i || o.Name == "" {
 			continue
 		}
-		db := isDatabase(o.Ref) || isDatabase(o.Name)
+		// db params (url/password/database/user) come from the NATIVE ply
+		// package's manifest — only a registry database declares them. A
+		// docker/repo/image "database" exposes only the universal built-in
+		// facts (host/port/addr/…), so don't offer params it hasn't got —
+		// mapping to {postgres.password} on an imported image fails to resolve.
+		db := o.Kind == cart.KindRegistry && (isDatabase(o.Ref) || isDatabase(o.Name))
 		others = append(others, otherRef{Name: o.Name, IsDB: db})
 		if db {
 			dbs = append(dbs, o.Name)
