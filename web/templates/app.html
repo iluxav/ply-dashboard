@@ -35,7 +35,7 @@
   {{range .App.Domains}}
   <div class="flex items-center gap-3 text-xs border border-edge rounded px-3 py-2">
     <a href="https://{{.}}" class="text-ink hover:text-accent font-mono">{{.}}</a>
-    <span class="text-green-400/60">↳ HTTPS via the edge</span>
+    <span class="js-domain-status text-fade/40" data-domain="{{.}}">checking…</span>
     <form method="post" action="/app/{{$.AppName}}/domain/remove" class="ml-auto"
           onsubmit="return confirm('Detach {{.}}? It stops routing on the next reconcile beat.')">
       <input type="hidden" name="domain" value="{{.}}">
@@ -45,7 +45,8 @@
   {{else}}
   <div class="text-fade/50 text-xs">no domain attached yet</div>
   {{end}}
-  <form method="post" action="/app/{{.AppName}}/domain/add" class="flex items-center gap-2 text-xs">
+  <form method="post" action="/app/{{.AppName}}/domain/add" class="flex items-center gap-2 text-xs"
+        onsubmit="var b=this.querySelector('button'); b.textContent='attaching…'; b.disabled=true;">
     <input name="domain" placeholder="app.example.com" spellcheck="false" autocomplete="off" required
            class="bg-card border border-edge rounded px-2 py-1.5 text-ink font-mono w-64 focus:border-accent/60 outline-none">
     <button class="bg-accent/90 hover:bg-accent text-ground font-bold rounded px-3 py-1.5">attach domain</button>
@@ -56,5 +57,31 @@
   issued automatically once it resolves (Caddy · Let's Encrypt). The service must be published for the edge to
   route to it.
 </div>
+
+<script>
+// Live domain status — the BROWSER probes each domain over HTTPS (it has
+// internet; the dashboard app may not). A no-cors fetch that RESOLVES means
+// the cert is issued and the edge is serving → live; a reject means still
+// provisioning (DNS not resolving yet, or the cert isn't issued). Poll until
+// live so "attach a domain" shows real progress instead of dead silence.
+(function(){
+  function live(el){ el.className='js-domain-status text-green-400'; el.textContent='● live · HTTPS'; }
+  function pending(el){ el.className='js-domain-status text-amber-500/80'; el.innerHTML='◌ provisioning… <span class="text-fade/40">waiting for DNS + certificate</span>'; }
+  function probe(el, tries){
+    var d = el.getAttribute('data-domain'); if(!d) return;
+    var ctrl = new AbortController(), t = setTimeout(function(){ ctrl.abort(); }, 5000);
+    fetch('https://'+d+'/?_ply='+Date.now(), {mode:'no-cors', cache:'no-store', signal:ctrl.signal})
+      .then(function(){ clearTimeout(t); live(el); })
+      .catch(function(){
+        clearTimeout(t); pending(el);
+        // back off a little, keep watching for ~10 min (cert issuance + DNS TTL)
+        if(tries < 100) setTimeout(function(){ probe(el, tries+1); }, 6000);
+      });
+  }
+  document.querySelectorAll('.js-domain-status').forEach(function(el){
+    if(el.dataset.probing) return; el.dataset.probing='1'; probe(el, 0);
+  });
+})();
+</script>
 {{end}}
 {{end}}
