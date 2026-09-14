@@ -14,6 +14,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -241,6 +242,8 @@ func main() {
 	mux.HandleFunc("POST /app/{name}/restart", s.guard(s.restartAction))
 	mux.HandleFunc("POST /app/{name}/snapshot", s.guard(s.snapshotAction))
 	mux.HandleFunc("POST /app/{name}/restore", s.guard(s.restoreAction))
+	mux.HandleFunc("POST /app/{name}/domain/add", s.guard(s.appDomainAdd))
+	mux.HandleFunc("POST /app/{name}/domain/remove", s.guard(s.appDomainRemove))
 	mux.HandleFunc("GET /deploy", s.guard(s.deployPage))
 	mux.HandleFunc("GET /notify", s.guard(s.notifyPage))
 	mux.HandleFunc("POST /notify/save", s.guard(s.notifySave))
@@ -489,7 +492,28 @@ func (s *server) appPage(w http.ResponseWriter, r *http.Request) {
 	data.Commands = commandsFor(app)
 	data.LogLines = s.logLines(app)
 	data.Events = plystate.Events(s.paths, name, 15)
+	data.DeployAvailable = plystate.DeploymentsAvailable(s.paths)
+	data.Error = r.URL.Query().Get("err")
 	s.render(w, "app", "base.html", data)
+}
+
+// appDomainAdd / appDomainRemove attach or detach a domain on the deployment
+// that owns this app, then redirect back to the app page.
+func (s *server) appDomainAdd(w http.ResponseWriter, r *http.Request) {
+	s.domainEdit(w, r, plystate.AddDomain)
+}
+
+func (s *server) appDomainRemove(w http.ResponseWriter, r *http.Request) {
+	s.domainEdit(w, r, plystate.RemoveDomain)
+}
+
+func (s *server) domainEdit(w http.ResponseWriter, r *http.Request, edit func(plystate.Paths, string, string) error) {
+	name := r.PathValue("name")
+	back := "/app/" + url.PathEscape(name)
+	if err := edit(s.paths, name, r.FormValue("domain")); err != nil {
+		back += "?err=" + url.QueryEscape(err.Error())
+	}
+	http.Redirect(w, r, back, http.StatusSeeOther)
 }
 
 func (s *server) appPartial(w http.ResponseWriter, r *http.Request) {
