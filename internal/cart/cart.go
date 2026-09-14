@@ -40,17 +40,18 @@ type KV struct {
 
 // Card is one service in the cart.
 type Card struct {
-	Name    string
-	Kind    string
-	Ref     string // repo URL, registry ref (name@ver), or image path/URL
-	Build   string // repo only
-	Runtime string // repo only
-	Publish []string
-	Domain  []string
-	Env     []string // "KEY=VALUE"
-	After   []string // member names this one starts after
-	Volume  []string
-	Extra   []KV // per-member keys the model doesn't carry (scale, egress, …)
+	Name      string
+	Kind      string
+	Ref       string // repo URL, registry ref (name@ver), or image path/URL
+	Build     string // repo only
+	Runtime   string // repo only
+	Publish   []string
+	Domain    []string
+	Env       []string // "KEY=VALUE"
+	SecretEnv []string // env keys whose VALUES live in the host secret store, not this file
+	After     []string // member names this one starts after
+	Volume    []string
+	Extra     []KV // per-member keys the model doesn't carry (scale, egress, …)
 }
 
 // Cart is the whole deployment being assembled.
@@ -193,9 +194,9 @@ func writeExtras(b *strings.Builder, kvs []KV) {
 
 // the keys the model already emits — everything else is preserved as an extra.
 var (
-	memberModeled = set("run", "name", "build", "runtime", "publish", "domain", "env", "after", "volume")
+	memberModeled = set("run", "name", "build", "runtime", "publish", "domain", "env", "secret_env", "after", "volume")
 	flatModeled   = set("repo", "app", "image", "docker", "build", "runtime", "version",
-		"publish", "domain", "volume", "env", "package", "service")
+		"publish", "domain", "volume", "env", "secret_env", "package", "service")
 	packageModeled = set("name", "version")
 	compTopModeled = set("package", "service")
 )
@@ -246,6 +247,10 @@ func (c Card) member() string {
 	}
 	if v := nonEmpty(c.Env); len(v) > 0 {
 		fmt.Fprintf(&b, "env = %s\n", tarr(v)) // member env is the array form
+	}
+	if v := nonEmpty(c.SecretEnv); len(v) > 0 {
+		// keys only — the VALUES live in the host secret store, never here
+		fmt.Fprintf(&b, "secret_env = %s\n", tarr(v))
 	}
 	writeExtras(&b, c.Extra) // scale / egress / params / … stay in this block
 	return b.String()
@@ -308,6 +313,10 @@ func (c Cart) flat() string {
 	if v := nonEmpty(card.Volume); len(v) > 0 {
 		fmt.Fprintf(&b, "volume = %s\n", tarr(v))
 	}
+	if v := nonEmpty(card.SecretEnv); len(v) > 0 {
+		// a top-level array — must precede the [env] table below (keys only)
+		fmt.Fprintf(&b, "secret_env = %s\n", tarr(v))
+	}
 	// preserved top-level keys (grant_links, env_file, scale, …) MUST come
 	// before the [env] table, or TOML folds them into it.
 	writeExtras(&b, c.Extra)
@@ -341,15 +350,16 @@ func (c Cart) ToTOML() string {
 func (c Cart) DraftTOML() string { return c.composition() }
 
 type rawMember struct {
-	Run     string   `toml:"run"`
-	Name    string   `toml:"name"`
-	Build   string   `toml:"build"`
-	Runtime string   `toml:"runtime"`
-	Publish []string `toml:"publish"`
-	Domain  []string `toml:"domain"`
-	Env     []string `toml:"env"`
-	After   []string `toml:"after"`
-	Volume  []string `toml:"volume"`
+	Run       string   `toml:"run"`
+	Name      string   `toml:"name"`
+	Build     string   `toml:"build"`
+	Runtime   string   `toml:"runtime"`
+	Publish   []string `toml:"publish"`
+	Domain    []string `toml:"domain"`
+	Env       []string `toml:"env"`
+	SecretEnv []string `toml:"secret_env"`
+	After     []string `toml:"after"`
+	Volume    []string `toml:"volume"`
 }
 
 type rawSpec struct {
@@ -359,17 +369,18 @@ type rawSpec struct {
 	} `toml:"package"`
 	Service []rawMember `toml:"service"`
 	// flat single-source order
-	Repo    string            `toml:"repo"`
-	App     string            `toml:"app"`
-	Image   string            `toml:"image"`
-	Docker  string            `toml:"docker"`
-	Build   string            `toml:"build"`
-	Runtime string            `toml:"runtime"`
-	Version string            `toml:"version"`
-	Publish []string          `toml:"publish"`
-	Domain  []string          `toml:"domain"`
-	Volume  []string          `toml:"volume"`
-	Env     map[string]string `toml:"env"`
+	Repo      string            `toml:"repo"`
+	App       string            `toml:"app"`
+	Image     string            `toml:"image"`
+	Docker    string            `toml:"docker"`
+	Build     string            `toml:"build"`
+	Runtime   string            `toml:"runtime"`
+	Version   string            `toml:"version"`
+	Publish   []string          `toml:"publish"`
+	Domain    []string          `toml:"domain"`
+	Volume    []string          `toml:"volume"`
+	Env       map[string]string `toml:"env"`
+	SecretEnv []string          `toml:"secret_env"`
 }
 
 func kindOfRun(run string) (kind, ref string) {
@@ -416,7 +427,8 @@ func FromTOML(spec string) (Cart, error) {
 				Name: name, Kind: kind, Ref: ref,
 				Build: m.Build, Runtime: m.Runtime,
 				Publish: m.Publish, Domain: m.Domain, Env: m.Env,
-				After: m.After, Volume: m.Volume,
+				SecretEnv: m.SecretEnv,
+				After:     m.After, Volume: m.Volume,
 			}
 			if i < len(svc) {
 				card.Extra = extras(svc[i], memberModeled)
@@ -426,7 +438,7 @@ func FromTOML(spec string) (Cart, error) {
 		return c, nil
 	}
 	// flat single-source order
-	card := Card{Publish: raw.Publish, Domain: raw.Domain, Volume: raw.Volume}
+	card := Card{Publish: raw.Publish, Domain: raw.Domain, Volume: raw.Volume, SecretEnv: raw.SecretEnv}
 	switch {
 	case raw.Repo != "":
 		card.Kind, card.Ref, card.Build, card.Runtime = KindRepo, raw.Repo, raw.Build, raw.Runtime

@@ -414,3 +414,52 @@ func TestDeriveNameDocker(t *testing.T) {
 		}
 	}
 }
+
+func TestMemberSecretEnvRoundTrips(t *testing.T) {
+	spec := `[package]
+name = "rtrtrtr"
+version = "0.1.0"
+
+[[service]]
+run = "git+https://github.com/x/api"
+name = "api"
+env = ["NODE_ENV=production"]
+secret_env = ["STRIPE_KEY", "SENDGRID_KEY"]
+
+[[service]]
+run = "postgres@17"
+name = "db"
+`
+	c, err := FromTOML(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Cards[0].SecretEnv; !reflect.DeepEqual(got, []string{"STRIPE_KEY", "SENDGRID_KEY"}) {
+		t.Fatalf("SecretEnv = %#v", got)
+	}
+	if len(c.Cards[1].SecretEnv) != 0 {
+		t.Fatalf("db card should have no secret_env, got %#v", c.Cards[1].SecretEnv)
+	}
+	assertTOMLEqual(t, spec, c.ToTOML())
+}
+
+func TestFlatOrderSecretEnvRoundTrips(t *testing.T) {
+	// single-app order: secret_env is a top-level array, must survive alongside
+	// grant_links and the [env] table.
+	spec := `app = "api"
+grant_links = true
+secret_env = ["STRIPE_KEY"]
+publish = ["internal:3000"]
+
+[env]
+NODE_ENV = "production"
+`
+	c, err := FromTOML(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Cards[0].SecretEnv; !reflect.DeepEqual(got, []string{"STRIPE_KEY"}) {
+		t.Fatalf("flat SecretEnv = %#v", got)
+	}
+	assertTOMLEqual(t, spec, c.ToTOML())
+}
