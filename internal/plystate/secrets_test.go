@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -126,5 +127,74 @@ func TestRenameMemberSecrets(t *testing.T) {
 	}
 	if !HasSecret(p, "dep", "other", "K") {
 		t.Fatal("unrelated member untouched")
+	}
+}
+
+func TestAppSecretGlueComposition(t *testing.T) {
+	p := Paths{Deployments: t.TempDir()}
+	writeDep(t, p, "rtrtrtr", `[package]
+name = "rtrtrtr"
+version = "0.1.0"
+
+[[service]]
+run = "git+https://github.com/x/api"
+name = "qa-server"
+env = ["NODE_ENV=production"]
+
+[[service]]
+run = "postgres@17"
+name = "postgres"
+`)
+	if err := os.MkdirAll(filepath.Join(p.Deployments, ".status"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(p.Deployments, ".status", "rtrtrtr.members"), []byte("qa-server\npostgres\n"), 0o644)
+	if err := AddSecretForApp(p, "qa-server", "STRIPE_KEY", "sk_live"); err != nil {
+		t.Fatal(err)
+	}
+	// declared in the deployment (source of truth) + value in the store keyed by member
+	if got := AttachedSecretKeys(p, "qa-server"); len(got) != 1 || got[0] != "STRIPE_KEY" {
+		t.Fatalf("AttachedSecretKeys = %#v", got)
+	}
+	if !HasSecret(p, "rtrtrtr", "qa-server", "STRIPE_KEY") {
+		t.Fatal("store value missing under rtrtrtr/qa-server.STRIPE_KEY")
+	}
+	if !SecretBacked(p, "qa-server", "STRIPE_KEY") {
+		t.Fatal("SecretBacked should be true")
+	}
+	// value never lands in the spec
+	raw, _ := os.ReadFile(filepath.Join(p.Deployments, "rtrtrtr.toml"))
+	if strings.Contains(string(raw), "sk_live") {
+		t.Fatalf("secret VALUE leaked into the spec:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), `secret_env = ["STRIPE_KEY"]`) {
+		t.Fatalf("secret_env not declared:\n%s", raw)
+	}
+	// refuse a key already used as a plain env value
+	if err := AddSecretForApp(p, "qa-server", "NODE_ENV", "x"); err == nil {
+		t.Fatal("should refuse a key that's already a plain env value")
+	}
+	// remove
+	if err := RemoveSecretForApp(p, "qa-server", "STRIPE_KEY"); err != nil {
+		t.Fatal(err)
+	}
+	if len(AttachedSecretKeys(p, "qa-server")) != 0 || HasSecret(p, "rtrtrtr", "qa-server", "STRIPE_KEY") {
+		t.Fatal("remove should drop the key and the store value")
+	}
+}
+
+func TestAppSecretGlueSingleApp(t *testing.T) {
+	p := Paths{Deployments: t.TempDir()}
+	writeDep(t, p, "api", "app = \"api\"\npublish = [\"internal:3000\"]\n")
+	if err := AddSecretForApp(p, "api", "STRIPE_KEY", "sk"); err != nil {
+		t.Fatal(err)
+	}
+	// single-app: reconcile keys the store by the deployment name
+	if !HasSecret(p, "api", "api", "STRIPE_KEY") {
+		t.Fatal("single-app store value should be under api/api.STRIPE_KEY")
+	}
+	raw, _ := os.ReadFile(filepath.Join(p.Deployments, "api.toml"))
+	if !strings.Contains(string(raw), `secret_env = ["STRIPE_KEY"]`) || strings.Contains(string(raw), "sk\n") {
+		t.Fatalf("flat secret_env wrong / value leaked:\n%s", raw)
 	}
 }

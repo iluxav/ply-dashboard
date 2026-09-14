@@ -17,7 +17,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
+
+	"github.com/iluxav/ply-dashboard/internal/cart"
 )
 
 // storeName is a deployment or member name: the same [a-z0-9-] shape ply uses,
@@ -174,4 +177,110 @@ func RenameMemberSecrets(p Paths, dep, oldMember, newMember string) error {
 		}
 	}
 	return firstErr
+}
+
+// --- app-page glue: edit a deployment's secret_env + its store together ------
+// The app page (post-deploy) manages secrets for one running service. These
+// resolve the deployment that owns `app`, edit the right card's `secret_env`
+// (via a lossless cart round-trip, like the domain editor), and write/remove
+// the store value with a fresh mtime so reconcile re-converges. The store key
+// member matches what ply-core reconcile uses: a composition member is keyed
+// by its own name, a single-app deployment by the deployment name.
+
+// appCardIndex finds the card in `c` that IS `app` (single-card → 0), and the
+// store member name ply-core reconcile uses for it.
+func appCardIndex(c cart.Cart, dep, app string) (idx int, member string, ok bool) {
+	if len(c.Cards) == 1 {
+		return 0, dep, true // single-app: reconcile keys the store by deployment name
+	}
+	for i := range c.Cards {
+		if c.Cards[i].Name == app {
+			return i, app, true // composition member: keyed by its own name
+		}
+	}
+	return 0, "", false
+}
+
+func loadDeploymentCart(p Paths, app string) (dep string, c cart.Cart, idx int, member string, err error) {
+	dep, ok := DeploymentOf(p, app)
+	if !ok {
+		return "", cart.Cart{}, 0, "", fmt.Errorf("no deployment owns app %q", app)
+	}
+	raw, err := os.ReadFile(filepath.Join(p.Deployments, dep+".toml"))
+	if err != nil {
+		return "", cart.Cart{}, 0, "", err
+	}
+	c, err = cart.FromTOML(string(raw))
+	if err != nil {
+		return "", cart.Cart{}, 0, "", fmt.Errorf("parsing deployment %q: %w", dep, err)
+	}
+	idx, member, ok = appCardIndex(c, dep, app)
+	if !ok {
+		return "", cart.Cart{}, 0, "", fmt.Errorf("service %q not found in deployment %q", app, dep)
+	}
+	return dep, c, idx, member, nil
+}
+
+// AttachedSecretKeys lists the secret env KEYS the DEPLOYMENT declares for an
+// app — the source of truth for the panel (like AttachedDomains). Sorted.
+func AttachedSecretKeys(p Paths, app string) []string {
+	_, c, idx, _, err := loadDeploymentCart(p, app)
+	if err != nil {
+		return nil
+	}
+	keys := append([]string(nil), c.Cards[idx].SecretEnv...)
+	sort.Strings(keys)
+	return keys
+}
+
+// SecretBacked reports whether the app's stored value for `key` exists — a
+// declared secret_env key with no store value would fail the next reconcile.
+func SecretBacked(p Paths, app, key string) bool {
+	dep, _, _, member, err := loadDeploymentCart(p, app)
+	if err != nil {
+		return false
+	}
+	return HasSecret(p, dep, member, key)
+}
+
+// AddSecretForApp stores a value and declares its key in the app's card
+// `secret_env`, writing the deployment back losslessly. A key already used as
+// a plain env value is refused (a value can't be public and secret).
+func AddSecretForApp(p Paths, app, key, value string) error {
+	if !envKey.MatchString(key) {
+		return fmt.Errorf("%q is not an environment variable name (letters, digits, underscore; not starting with a digit)", key)
+	}
+	if strings.TrimSpace(value) == "" {
+		return fmt.Errorf("a secret value is required")
+	}
+	dep, c, idx, member, err := loadDeploymentCart(p, app)
+	if err != nil {
+		return err
+	}
+	for _, e := range c.Cards[idx].Env {
+		if k, _, _ := strings.Cut(e, "="); k == key {
+			return fmt.Errorf("%s is already a plain env value — a value can't be public and secret; remove it from env first", key)
+		}
+	}
+	if err := SetSecret(p, dep, member, key, value); err != nil {
+		return err
+	}
+	if !containsStr(c.Cards[idx].SecretEnv, key) {
+		c.Cards[idx].SecretEnv = append(c.Cards[idx].SecretEnv, key)
+	}
+	return writeSpec(p, dep, c.ToTOML())
+}
+
+// RemoveSecretForApp drops the key from the app's card `secret_env` and
+// removes its stored value.
+func RemoveSecretForApp(p Paths, app, key string) error {
+	dep, c, idx, member, err := loadDeploymentCart(p, app)
+	if err != nil {
+		return err
+	}
+	c.Cards[idx].SecretEnv = withoutStr(c.Cards[idx].SecretEnv, key)
+	if err := writeSpec(p, dep, c.ToTOML()); err != nil {
+		return err
+	}
+	return RemoveSecret(p, dep, member, key)
 }
